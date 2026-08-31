@@ -2,7 +2,7 @@ PRAGMA foreign_keys = ON; -- creacion de la base de datos
 
 
 -- Proveedores
-CREATE TABLE proveedores (
+CREATE TABLE if not exists proveedores (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nomEmpresa TEXT NOT NULL,
     telefono TEXT,
@@ -11,7 +11,7 @@ CREATE TABLE proveedores (
 );
 
 -- Productos / Inventario
-CREATE TABLE productos (
+CREATE TABLE if not exists productos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     codOrigi text unique, --codigo original 
     codigo TEXT UNIQUE, -- codigo de la empresa 
@@ -28,9 +28,9 @@ CREATE TABLE productos (
 );
 
 -- Ventas (cabecera)
-CREATE TABLE ventas (
+CREATE TABLE if not exists   ventas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,    
-    cliente TEXT, --opcional
+    nombre_cliente TEXT, --opcional
     total REAL NOT NULL DEFAULT 0, --factura?
     forma_pago TEXT, --opcional
     id_vendedor INTEGER,         --esto es para saber quien hizo la venta
@@ -39,7 +39,7 @@ CREATE TABLE ventas (
 );
 
 -- Detalle de venta (varios productos por venta)
-CREATE TABLE detalle_ventas (
+CREATE TABLE if not exists detalle_ventas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     id_venta INTEGER NOT NULL,
     id_producto INTEGER NOT NULL,
@@ -51,7 +51,7 @@ CREATE TABLE detalle_ventas (
 );
 
 -- Kardex (historial de movimientos de inventario)
-CREATE TABLE kardex (
+CREATE TABLE if not exists kardex (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     id_producto INTEGER NOT NULL,
     fecha TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -66,7 +66,7 @@ CREATE TABLE kardex (
 );
 
 --usuario
-CREATE TABLE usuarios (
+CREATE TABLE if not exists usuarios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre TEXT NOT NULL,
     email TEXT UNIQUE NOT NULL,
