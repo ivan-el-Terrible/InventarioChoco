@@ -141,12 +141,13 @@ def actualizar_proveedor(id):
             id
         ))
 
-        db.commit()
 
         if cursor.rowcount == 0:
             return jsonify({
                 "error": "Proveedor no encontrado"
             }), 404
+
+        db.commit()
 
         return jsonify({
             "mensaje": "Proveedor actualizado correctamente"
@@ -180,12 +181,13 @@ def eliminar_proveedor(id):
             WHERE id = ?
         """, (id,))
 
-        db.commit()
 
         if cursor.rowcount == 0:
             return jsonify({
                 "error": "Proveedor no encontrado"
             }), 404
+
+        db.commit()
 
         return jsonify({
             "mensaje": "Proveedor eliminado correctamente"

@@ -50,11 +50,11 @@ def obtener_ventas():
             v.nombre_cliente,
             v.total,
             v.forma_pago,
-            v.id_usuario,
+            v.id_vendedor,
             u.nombre AS vendedor
         FROM ventas v
         LEFT JOIN usuarios u
-            ON v.id_usuario = u.id
+            ON v.id_vendedor = u.id
         ORDER BY v.id DESC
     """).fetchall()
 
@@ -79,11 +79,11 @@ def obtener_venta(id_venta):
             v.nombre_cliente,
             v.total,
             v.forma_pago,
-            v.id_usuario,
+            v.id_vendedor,
             u.nombre AS vendedor
         FROM ventas v
         LEFT JOIN usuarios u
-            ON v.id_usuario = u.id
+            ON v.id_vendedor = u.id
         WHERE v.id = ?
     """, (id_venta,)).fetchone()
 
@@ -127,7 +127,7 @@ def registrar_venta():
 
     nombre_cliente = data.get("nombre_cliente")
     forma_pago = data.get("forma_pago")
-    id_usuario = data.get("id_usuario")
+    id_vendedor = data.get("id_vendedor")
     detalles = data.get("detalles")
 
     # -----------------------------------------
@@ -139,9 +139,9 @@ def registrar_venta():
             "error": "El nombre del cliente es obligatorio"
         }), 400
 
-    if not id_usuario:
+    if not id_vendedor:
         return jsonify({
-            "error": "Debe indicar el usuario que realiza la venta"
+            "error": "Debe indicar el vendedor que realiza la venta"
         }), 400
 
     if not detalles or len(detalles) == 0:
@@ -162,14 +162,14 @@ def registrar_venta():
                 nombre_cliente,
                 total,
                 forma_pago,
-                id_usuario
+                id_vendedor
             )
             VALUES (?, ?, ?, ?)
         """, (
             nombre_cliente,
             0,
             forma_pago,
-            id_usuario
+            id_vendedor
         ))
 
         id_venta = cursor.lastrowid
