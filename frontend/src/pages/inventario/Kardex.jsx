@@ -49,7 +49,7 @@ export default function Kardex({ producto, onClose }) {
         </div>
 
         {/* Tabla de Movimientos del Kardex */}
-        <div className="p-6 overflow-y-auto flex-1">
+        <div className="p-6 overflow-auto flex-1">
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200">
               <tr>

@@ -14,11 +14,13 @@ import {
 /*ste componente se encarga de la navegación entre los módulos. Oculta o muestra opciones 
 según el rol del usuario conectado (Administrador vs. Vendedor).*/
 
-export default function Sidebar({ usuario = { nombre: 'Iván', rol: 'admin' } }) {
+export default function Sidebar({ usuario = { nombre: 'Iván', rol: 'admin' }, abierto, onClose, onLogout }) {
   const esAdmin = usuario.rol === 'admin';
 
   return (
-    <aside className="w-64 bg-slate-900 text-slate-300 min-h-screen flex flex-col justify-between border-r border-slate-800">
+    <>
+    {abierto && <button aria-label="Cerrar menú" onClick={onClose} className="fixed inset-0 z-30 bg-slate-950/50 lg:hidden" />}
+    <aside className={`fixed inset-y-0 left-0 z-40 w-64 bg-slate-950 text-slate-300 flex flex-col justify-between border-r border-slate-800 transition-transform duration-200 lg:translate-x-0 ${abierto ? 'translate-x-0' : '-translate-x-full'}`}>
       <div>
         {/* Logo / Nombre del Negocio */}
         <div className="p-6 border-b border-slate-800 flex items-center gap-3">
@@ -26,8 +28,8 @@ export default function Sidebar({ usuario = { nombre: 'Iván', rol: 'admin' } })
             <Package size={22} />
           </div>
           <div>
-            <h1 className="font-bold text-white text-base leading-tight">ControlStock</h1>
-            <span className="text-xs text-slate-500 font-medium">Sistema POS & Inventario</span>
+            <h1 className="font-bold text-white text-base leading-tight">Inventario Choco</h1>
+            <span className="text-xs text-slate-500 font-medium">Ventas e inventario</span>
           </div>
         </div>
 
@@ -53,6 +55,7 @@ export default function Sidebar({ usuario = { nombre: 'Iván', rol: 'admin' } })
           {/* VENDEDOR Y ADMIN: Acceso a Ventas */}
           <NavLink
             to="/ventas"
+            onClick={onClose}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
                 isActive ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-slate-800 text-slate-400 hover:text-slate-200'
@@ -60,7 +63,7 @@ export default function Sidebar({ usuario = { nombre: 'Iván', rol: 'admin' } })
             }
           >
             <ShoppingCart size={18} />
-            <span>Punto de Ventas (POS)</span>
+            <span>Punto de ventas</span>
           </NavLink>
 
           {/* SOLO ADMIN: Módulos restringidos de Inventario */}
@@ -72,6 +75,7 @@ export default function Sidebar({ usuario = { nombre: 'Iván', rol: 'admin' } })
 
               <NavLink
                 to="/inventario/dashboard"
+                onClick={onClose}
                 className={({ isActive }) =>
                   `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
                     isActive ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-slate-800 text-slate-400 hover:text-slate-200'
@@ -84,6 +88,7 @@ export default function Sidebar({ usuario = { nombre: 'Iván', rol: 'admin' } })
 
               <NavLink
                 to="/inventario/productos"
+                onClick={onClose}
                 className={({ isActive }) =>
                   `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
                     isActive ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-slate-800 text-slate-400 hover:text-slate-200'
@@ -96,6 +101,7 @@ export default function Sidebar({ usuario = { nombre: 'Iván', rol: 'admin' } })
 
               <NavLink
                 to="/inventario/entradas"
+                onClick={onClose}
                 className={({ isActive }) =>
                   `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
                     isActive ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-slate-800 text-slate-400 hover:text-slate-200'
@@ -105,6 +111,19 @@ export default function Sidebar({ usuario = { nombre: 'Iván', rol: 'admin' } })
                 <ArrowDownCircle size={18} />
                 <span>Entradas de Stock</span>
               </NavLink>
+
+              <NavLink
+                to="/inventario/kardex"
+                onClick={onClose}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                    isActive ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-slate-800 text-slate-400 hover:text-slate-200'
+                  }`
+                }
+              >
+                <LayoutDashboard size={18} />
+                <span>Kardex General</span>
+              </NavLink>
             </>
           )}
         </nav>
@@ -113,7 +132,7 @@ export default function Sidebar({ usuario = { nombre: 'Iván', rol: 'admin' } })
       {/* Botón de Cerrar Sesión */}
       <div className="p-3 border-t border-slate-800">
         <button
-          onClick={() => alert('Cerrando sesión...')}
+          onClick={onLogout}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 transition-colors"
         >
           <LogOut size={18} />
@@ -121,5 +140,6 @@ export default function Sidebar({ usuario = { nombre: 'Iván', rol: 'admin' } })
         </button>
       </div>
     </aside>
+    </>
   );
 }

@@ -15,11 +15,11 @@ import {
 export default function VentasPro() {
   // Catálogo de productos disponibles (Simulación de consulta a SQLite)
   const [productos] = useState([
-    { id: 1, codigo: 'PROD-001', nombre: 'Teclado Mecánico RGB', precio: 65.00, stock: 12 },
-    { id: 2, codigo: 'PROD-002', nombre: 'Mouse Inalámbrico Pro', precio: 30.00, stock: 3 },
-    { id: 3, codigo: 'PROD-003', nombre: 'Monitor 24" Full HD', precio: 180.00, stock: 8 },
-    { id: 4, codigo: 'PROD-004', nombre: 'Auriculares Gaming', precio: 45.00, stock: 15 },
-    { id: 5, codigo: 'PROD-005', nombre: 'Pad Mouse XL', precio: 15.00, stock: 20 },
+    { id: 1, codOrigen: '123', codigo: 'PROD-001', nombre: 'cruzetas', precio: 65.00, stock: 12 },
+    { id: 2, codOrigen: '456', codigo: 'PROD-002', nombre: 'correa dentada', precio: 30.00, stock: 5 },
+    { id: 3, codOrigen: '789', codigo: 'PROD-003', nombre: 'rodamientos', precio: 180.00, stock: 8 },
+    { id: 4, codOrigen: '012', codigo: 'PROD-004', nombre: 'pastillas', precio: 45.00, stock: 15 },
+    { id: 5, codOrigen: '345', codigo: 'PROD-005', nombre: 'baterías', precio: 15.00, stock: 20 },
   ]);
 
   const [busqueda, setBusqueda] = useState('');
@@ -27,11 +27,13 @@ export default function VentasPro() {
   const [metodoPago, setMetodoPago] = useState('efectivo');
   const [montoPagado, setMontoPagado] = useState('');
   const [ventaExitosa, setVentaExitosa] = useState(false);
+  const [conFactura, setConFactura] = useState(true); // estado nuevo para calcular el cambio si se paga con factura o sin factura
 
   // Filtrar productos
   const productosFiltrados = productos.filter(p =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
-    p.codigo.toLowerCase().includes(busqueda.toLowerCase())
+    p.codigo.toLowerCase().includes(busqueda.toLowerCase()) ||
+    p.codOrigen.toLowerCase().includes(busqueda.toLowerCase())
   );
 
   // Agregar producto al carrito
@@ -80,23 +82,30 @@ export default function VentasPro() {
   const subtotal = carrito.reduce((acc, item) => acc + (item.precio * item.cantidad), 0);
   const impuesto = subtotal * 0.13; // Ejemplo IVA 13%
   const total = subtotal + impuesto;
-  const cambio = parseFloat(montoPagado) ? Math.max(0, parseFloat(montoPagado) - total) : 0;
+  const totalActual = conFactura ? total : subtotal;
+  const cambio = parseFloat(montoPagado)
+  ? Math.max(0, parseFloat(montoPagado) - totalActual)
+  : 0;
 
   // Procesar venta
-  const procesarVenta = (e) => {
+  const procesarVenta = (e, conFactura) => {
     e.preventDefault();
+
     if (carrito.length === 0) {
       alert('El carrito está vacío');
       return;
     }
-    if (metodoPago === 'efectivo' && (parseFloat(montoPagado) < total || !montoPagado)) {
+
+    const totalAPagar = conFactura ? total : subtotal;
+  
+    if (metodoPago === 'efectivo' && (parseFloat(montoPagado) < totalAPagar || !montoPagado)) {
       alert('El monto pagado es insuficiente');
       return;
-    }
+      }
 
-    // Aquí se enviará la venta a Flask / Python en el futuro
-    setVentaExitosa(true);
-  };
+      setVentaExitosa(true);
+      // Aquí se enviará la venta a Flask / Python en el futuro, incluyendo si es con o sin factura
+    }; 
 
   const nuevaVenta = () => {
     setCarrito([]);
@@ -104,8 +113,12 @@ export default function VentasPro() {
     setVentaExitosa(false);
   };
 
+
+
+  /*de aqui para abajo es el codigo de la pagina de ventas, es decir el html y css de la pagina de ventas */
+
   return (
-    <div className="flex flex-col lg:flex-row h-screen bg-slate-100 overflow-hidden">
+    <div className="flex flex-col lg:flex-row h-screen bg-slate-900 overflow-hidden">
       
       {/* SECCIÓN IZQUIERDA: Catálogo de Productos */}
       <div className="flex-1 p-6 flex flex-col overflow-hidden">
@@ -113,56 +126,105 @@ export default function VentasPro() {
         {/* Cabecera y Buscador */}
         <div className="mb-6 flex justify-between items-center gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-800">Punto de Venta</h1>
-            <p className="text-slate-500 text-xs">Selecciona o busca productos para agregar a la nota de venta</p>
+            <h1 className="text-2xl font-bold text-slate-100">Punto de Venta</h1>
+            <p className="text-slate-200 text-xs">Selecciona o busca productos para agregar a la nota de venta</p>
           </div>
           <div className="relative w-72">
-            <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
+            <Search className=" absolute left-3 top-2.5 text-slate-400" size={18} />
             <input
               type="text"
-              placeholder="Buscar por código o nombre..."
+              placeholder="Busca por codOrigen, código o nombre..." /*este es el buscador de productos */
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-white border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+              className="w-full pl-10 pr-4 py-2 bg-slate-300 border border-slate-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
             />
           </div>
         </div>
 
         {/* Grid de Tarjetas de Productos */}
-        <div className="flex-1 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4 pr-2">
-          {productosFiltrados.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => agregarAlCarrito(p)}
-              className="bg-white p-4 rounded-xl border border-slate-200 hover:border-blue-500 hover:shadow-md transition-all text-left flex flex-col justify-between group relative"
-            >
-              <div>
-                <span className="text-[10px] font-mono text-slate-400 font-bold block mb-1">{p.codigo}</span>
-                <h3 className="font-semibold text-slate-800 text-sm group-hover:text-blue-600 line-clamp-2">{p.nombre}</h3>
-              </div>
-              <div className="mt-4 flex justify-between items-end">
-                <div>
-                  <span className="text-xs text-slate-400 block">Precio</span>
-                  <span className="text-base font-bold text-slate-900">${p.precio.toFixed(2)}</span>
-                </div>
-                <span className={`text-[11px] px-2 py-0.5 rounded-md font-bold ${
-                  p.stock > 5 ? 'bg-slate-100 text-slate-600' : 'bg-amber-100 text-amber-700'
-                }`}>
-                  {p.stock} pzas
-                </span>
-              </div>
-            </button>
-          ))}
+        <div className="flex-1 overflow-y-auto pr-2">
+          <div className="bg-slate-300 rounded-xl border border-slate-200 overflow-hidden">
+
+            <table className="w-full text-left">
+              <thead className="bg-slate-800 border-b border-slate-200">
+                <tr>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-100">
+                    Cod_Origen
+                  </th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-100">
+                    Código
+                  </th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-100">
+                    Producto
+                  </th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-100">
+                    Precio
+                  </th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-100 text-right">
+                    Stock
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-slate-100">
+                {productosFiltrados.map((p) => (
+                  <tr
+                    key={p.id}
+                    onClick={() => agregarAlCarrito(p)}
+                    className="hover:bg-slate-50 cursor-pointer transition-colors"
+                  >
+                    <td className="px-4 py-3">
+                      <span className="text-sm font-mono font-bold text-slate-900">
+                        {p.codOrigen}
+                      </span>
+                    </td>
+
+                    <td className="px-4 py-3">
+                      <span className="text-sm font-mono font-bold text-slate-900">
+                        {p.codigo}
+                      </span>
+                    </td>
+
+                    <td className="px-4 py-3">
+                      <span className="text-sm font-semibold text-slate-900">
+                        {p.nombre}
+                      </span>
+                    </td>
+
+                    <td className="px-4 py-3">
+                      <span className="text-sm font-bold text-slate-900">
+                        ${p.precio.toFixed(2)}
+                      </span>
+                    </td>
+
+                    <td className="px-4 py-3 text-right">
+                      <span
+                      /** condicion para que cuando el stock este bajo 5 me muestre en rojo */
+                        className={`text-[12px] px-2 py-1 rounded-md font-bold ${
+                          p.stock > 5
+                            ? "bg-slate-100 text-black"
+                            : "bg-amber-100 text-red-600"
+                        }`}
+                      >
+                        {p.stock} pzas
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+          </div>
         </div>
       </div>
 
       {/* SECCIÓN DERECHA: Carrito y Cobro */}
-      <div className="w-full lg:w-96 bg-white border-l border-slate-200 flex flex-col h-full shadow-lg">
+      <div className="w-full lg:w-96 bg-slate-00 border-l border-slate-200 flex flex-col h-full shadow-lg">
         
         {/* Encabezado del Carrito */}
-        <div className="p-4 border-b border-slate-200 flex items-center gap-2 bg-slate-50">
-          <ShoppingCart className="text-blue-600" size={20} />
-          <h2 className="font-bold text-slate-800">Orden de Venta</h2>
+        <div className="p-4 border-b border-slate-200 flex items-center gap-2 bg-slate-500">
+          <ShoppingCart className="text-red-500" size={25} />
+          <h2 className="font-bold text-slate-100">Orden de Venta</h2>
           <span className="ml-auto bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">
             {carrito.reduce((acc, item) => acc + item.cantidad, 0)} ítems
           </span>
@@ -172,31 +234,31 @@ export default function VentasPro() {
         <div className="flex-1 overflow-y-auto p-4 space-y-3 divide-y divide-slate-100">
           {carrito.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-slate-400 text-center p-6">
-              <ShoppingCart size={48} className="mb-2 stroke-1" />
-              <p className="text-sm">El carrito está vacío</p>
+              <ShoppingCart size={48} className="mb-2 stroke-1 text-red-500" />
+              <p className="text-sm text-slate-300">El carrito está vacío</p>
               <p className="text-xs text-slate-400 mt-1">Haz clic en los productos para agregarlos</p>
             </div>
           ) : (
             carrito.map((item) => (
               <div key={item.id} className="pt-3 first:pt-0 flex justify-between items-center">
                 <div className="flex-1 pr-2">
-                  <h4 className="text-xs font-semibold text-slate-800 truncate">{item.nombre}</h4>
-                  <span className="text-xs text-slate-500">${item.precio.toFixed(2)} c/u</span>
+                  <h4 className="text-sm font-semibold text-slate-100 truncate">{item.nombre}</h4>
+                  <span className="text-xs text-slate-100">${item.precio.toFixed(2)} c/u</span>
                 </div>
                 
                 {/* Controles de Cantidad */}
                 <div className="flex items-center gap-2">
-                  <div className="flex items-center border border-slate-200 rounded-lg bg-slate-50">
+                  <div className="flex items-center border border-blue-500 rounded-lg bg-slate-200">
                     <button
                       onClick={() => cambiarCantidad(item.id, -1)}
-                      className="p-1 hover:bg-slate-200 text-slate-600 rounded-l-lg"
+                      className="p-1 hover:bg-slate-400 text-slate-900 rounded-l-lg"
                     >
                       <Minus size={14} />
                     </button>
-                    <span className="px-2 text-xs font-bold text-slate-800">{item.cantidad}</span>
+                    <span className="px-2 text-xs font-bold text-black-500">{item.cantidad}</span>
                     <button
                       onClick={() => cambiarCantidad(item.id, 1)}
-                      className="p-1 hover:bg-slate-200 text-slate-600 rounded-r-lg"
+                      className="p-1 hover:bg-slate-400 text-slate-900 rounded-r-lg"
                     >
                       <Plus size={14} />
                     </button>
@@ -204,9 +266,9 @@ export default function VentasPro() {
                   
                   <button
                     onClick={() => eliminarDelCarrito(item.id)}
-                    className="p-1 text-slate-400 hover:text-rose-600 transition-colors"
+                    className="p-1 text-slate-300 hover:text-rose-500 transition-colors"
                   >
-                    <Trash2 size={16} />
+                    <Trash2 size={20} />
                   </button>
                 </div>
               </div>
@@ -215,7 +277,7 @@ export default function VentasPro() {
         </div>
 
         {/* Totales y Métodos de Pago */}
-        <div className="p-4 border-t border-slate-200 bg-slate-50 space-y-3">
+        <div className="p-4 border-t border-slate-100 bg-slate-300 space-y-3">
           
           <div className="space-y-1 text-xs text-slate-600">
             <div className="flex justify-between">
@@ -226,14 +288,20 @@ export default function VentasPro() {
               <span>Impuesto (13%):</span>
               <span>${impuesto.toFixed(2)}</span>
             </div>
-            <div className="flex justify-between text-base font-bold text-slate-900 pt-2 border-t border-slate-200">
-              <span>Total Pagar:</span>
+            <div className="flex justify-between text-base font-bold text-slate-900 pt-2 border-t border-slate-900">
+              
+              <span>Total sin factura:</span>
+              <span className="text-red-600">${subtotal.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between text-base font-bold text-slate-900 pt-2 border-t border-slate-900">
+              
+              <span>Total con factura:</span>
               <span className="text-blue-600">${total.toFixed(2)}</span>
             </div>
           </div>
 
           {/* Selección Método de Pago */}
-          <div className="grid grid-cols-3 gap-2 pt-2">
+          <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-900">
             <button
               onClick={() => setMetodoPago('efectivo')}
               className={`p-2 rounded-lg border text-xs font-medium flex flex-col items-center gap-1 ${
@@ -245,7 +313,7 @@ export default function VentasPro() {
             <button
               onClick={() => setMetodoPago('tarjeta')}
               className={`p-2 rounded-lg border text-xs font-medium flex flex-col items-center gap-1 ${
-                metodoPago === 'tarjeta' ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-700'
+                metodoPago === 'tarjeta' ? 'bg-red-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-700'
               }`}
             >
               <CreditCard size={16} /> Tarjeta
@@ -253,7 +321,7 @@ export default function VentasPro() {
             <button
               onClick={() => setMetodoPago('qr')}
               className={`p-2 rounded-lg border text-xs font-medium flex flex-col items-center gap-1 ${
-                metodoPago === 'qr' ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-700'
+                metodoPago === 'qr' ? 'bg-red-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-700'
               }`}
             >
               <QrCode size={16} /> QR / Transf.
@@ -284,14 +352,23 @@ export default function VentasPro() {
 
           {/* Botón Completar Venta */}
           <button
-            onClick={procesarVenta}
+            onClick={ (e) => { setConFactura(true); procesarVenta(e, true); } }
             disabled={carrito.length === 0}
             className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white rounded-xl font-bold transition-all shadow-md flex items-center justify-center gap-2 mt-2"
           >
-            <Receipt size={18} /> Procesar Venta y Facturar
+            
+            <Receipt size={18} /> pagar con factura
           </button>
+          
+
+          <button 
+          onClick={ (e) => { setConFactura(false); procesarVenta(e, false); } } 
+          disabled={carrito.length === 0} className="w-full py-3 bg-red-500 hover:bg-red-700 disabled:bg-slate-300 text-white rounded-xl font-bold transition-all shadow-md flex items-center justify-center gap-2 mt-2" 
+          >
+             <Receipt size={18} /> Procesar sin factura </button>
         </div>
       </div>
+
 
       {/* Modal de Confirmación / Recibo de Venta */}
       {ventaExitosa && (
@@ -304,7 +381,7 @@ export default function VentasPro() {
             <p className="text-xs text-slate-500 mt-1">El stock ha sido descontado del inventario automáticamente.</p>
             
             <div className="my-4 p-3 bg-slate-50 rounded-lg text-left text-xs space-y-1 border border-slate-200">
-              <div className="flex justify-between text-slate-600"><span>Monto Total:</span> <strong className="text-slate-800">${total.toFixed(2)}</strong></div>
+              <div className="flex justify-between text-slate-600"><span>Monto Total:</span> <strong className="text-slate-800">${totalActual.toFixed(2)}</strong></div>
               <div className="flex justify-between text-slate-600"><span>Método de Pago:</span> <strong className="uppercase text-slate-800">{metodoPago}</strong></div>
               {metodoPago === 'efectivo' && (
                 <div className="flex justify-between text-slate-600"><span>Cambio Entregado:</span> <strong className="text-emerald-600">${cambio.toFixed(2)}</strong></div>
