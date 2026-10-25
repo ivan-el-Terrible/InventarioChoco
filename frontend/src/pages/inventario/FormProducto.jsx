@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { X, Save } from 'lucide-react';
 
-export default function FormProducto({ onClose, onGuardar }) {
+export default function FormProducto({ onClose, onGuardar }) {//tabla del formulario 
   const [formData, setFormData] = useState({
+    codOriginal: '',
     codigo: '',
     nombre: '',
     categoria: 'Periféricos',
@@ -12,7 +13,7 @@ export default function FormProducto({ onClose, onGuardar }) {
     minStock: 5
   });
 
-  const handleChange = (e) => {
+  const handleChange = (e) => { //este es la funcion qe envia el formulario
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
@@ -23,8 +24,7 @@ export default function FormProducto({ onClose, onGuardar }) {
       alert('Por favor completa los campos obligatorios');
       return;
     }
-    // Aquí se enviará la información a Python
-    console.log('Nuevo Producto:', formData);
+    onGuardar({ ...formData, costo: Number(formData.costo), precio: Number(formData.precio), stock: Number(formData.stock), minStock: Number(formData.minStock) });
     onClose();
   };
 
@@ -40,7 +40,7 @@ export default function FormProducto({ onClose, onGuardar }) {
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">Código / SKU</label>
               <input
@@ -80,7 +80,7 @@ export default function FormProducto({ onClose, onGuardar }) {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">Precio Costo ($) *</label>
               <input
@@ -109,7 +109,7 @@ export default function FormProducto({ onClose, onGuardar }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">Stock Inicial *</label>
               <input
