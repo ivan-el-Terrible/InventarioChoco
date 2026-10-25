@@ -1,33 +1,74 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, Search, Filter, AlertTriangle, Eye, Edit, Package, DollarSign } from 'lucide-react';  // estas son las impraciones de iconos de react
 import FormProducto from './FormProducto';
 import Kardex from './Kardex';
 
 export default function ListaProductos() {
-  // Datos simulados (mientras conectamos el Backend en Python) estos datos es como si ya los tuvieramos en la base de datos mientras 
-  // se diseña la interfaz necesitamos los  datos para las tablas 
-  const [productos, setProductos] = useState([
-    { id: 1, codOrigen: '123', codigo: 'PROD-001', nombre: 'Teclado Mecánico RGB', categoria: 'Periféricos', costo: 35.00, precio: 65.00, stock: 12, minStock: 5 },
-    { id: 2, codOrigen: '456', codigo: 'PROD-002', nombre: 'Mouse Inalámbrico Pro', categoria: 'Periféricos', costo: 15.00, precio: 30.00, stock: 3, minStock: 5 },
-    { id: 3, codOrigen: '789', codigo: 'PROD-003', nombre: 'Monitor 24" Full HD', categoria: 'Pantallas', costo: 110.00, precio: 180.00, stock: 8, minStock: 2 },
-  ]);
+  const [productos, setProductos] = useState([]);
+  const [cargando, setCargando] = useState(true);
+  const [errorProductos, setErrorProductos] = useState('');
 
   const [busqueda, setBusqueda] = useState('');// estado vacio 
   const [modalAbierto, setModalAbierto] = useState(false);
   const [productoSeleccionadoKardex, setProductoSeleccionadoKardex] = useState(null);
 
-  const guardarProducto = (nuevoProducto) => { /*metodo para guardar un nuevo producto */
-    setProductos(actuales => [...actuales, { ...nuevoProducto,
-                                             id: Date.now(),
-                                             codOrigen: nuevoProducto.codOrigen,   //|| `COD-${String(actuales.length + 1).padStart(3, '0')}`, esto para que pongamos nosotros el codigo original 
-                                             codigo: nuevoProducto.codigo || `PROD-${String(actuales.length + 1).padStart(3, '0')}` }]);
+  const cargarProductos = async () => {
+    setCargando(true);
+    setErrorProductos('');
+
+    try {
+      const respuesta = await fetch('http://127.0.0.1:5000/productos');
+
+      if (!respuesta.ok) {
+        throw new Error('No se pudieron obtener los productos');
+      }
+
+      const datos = await respuesta.json();
+
+      const productosAdaptados = datos.map((p) => ({
+        id: p.id,
+        codOrigen: p.codOrigi ?? '',
+        codigo: p.codigo ?? '',
+        nombre: p.nombre,
+        categoria: p.tipo ?? '',
+        costo: Number(p.precio_compra ?? 0),
+        precio: Number(p.precio_venta ?? 0),
+        stock: Number(p.stock ?? 0),
+        minStock: 5,
+        marca: p.marca,
+        descripcion: p.descripcion,
+        proveedor: p.proveedor,
+        id_proveedor: p.id_proveedor
+      }));
+
+      setProductos(productosAdaptados);
+
+    } catch (error) {
+      console.error('Error al cargar productos:', error);
+      setErrorProductos(error.message);
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  useEffect(() => {
+    cargarProductos();
+  }, []);
+
+  const guardarProducto = async () => {
+    await cargarProductos();
   };
 
   // Filtrado dinámico para la busqueda
-  const productosFiltrados = productos.filter(p =>
-    p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
-    p.codigo.toLowerCase().includes(busqueda.toLowerCase())
-  ); // busca  un producto por nombre o codigo, filtra los nombres o codigo 
+  const productosFiltrados = productos.filter(p => {
+    const texto = busqueda.toLowerCase().trim();
+
+    return (
+      p.nombre.toLowerCase().includes(texto) ||
+      p.codigo.toLowerCase().includes(texto) ||
+      p.codOrigen.toLowerCase().includes(texto)
+    );
+});
 
   return (
     <div className="p-6 bg-slate-900 min-h-screen">  //esto es el fondo como si fuera un panel de los de netbeans 
@@ -85,7 +126,7 @@ export default function ListaProductos() {
           <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
           <input
             type="text"
-            placeholder="Buscar por nombre o código..."
+            placeholder="Buscar por nombre o código o cod_origen..."
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
             className="w-full pl-10 pr-4 py-2 bg-slate-200 border border-slate-900 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -93,7 +134,20 @@ export default function ListaProductos() {
         </div>
       </div>
 
-      {/* Tabla de Productos */}
+
+      {cargando && (
+        <p className="mb-4 text-sm text-blue-300">
+          Cargando productos desde la base de datos...
+        </p>
+        )}
+
+        {errorProductos && (
+          <p className="mb-4 rounded-lg bg-red-100 p-3 text-sm text-red-700">
+            {errorProductos}
+          </p>
+        )}
+
+        {/* Tabla de Productos */}
       <div className="bg-slate-300 rounded-xl border border-slate-100 shadow-sm overflow-x-auto">
         <table className="w-full text-left text-sm text-black">
           <thead className="bg-slate-800 text-slate-100 font-semibold border-b border-slate-100">

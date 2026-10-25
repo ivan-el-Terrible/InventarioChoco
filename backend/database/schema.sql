@@ -21,6 +21,7 @@ CREATE TABLE if not exists productos (
     marca TEXT,
     stock REAL NOT NULL DEFAULT 0,
     precio_compra REAL NOT NULL DEFAULT 0,
+    costo_promedio REAL DEFAULT 0,
     precio_venta REAL NOT NULL DEFAULT 0,
     id_proveedor INTEGER,
     fecha TEXT DEFAULT CURRENT_TIMESTAMP,

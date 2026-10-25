@@ -15,6 +15,8 @@ def obtener_kardex():
         SELECT
             k.id,
             k.id_producto,
+            p.codOrigi,
+            p.codigo,
             p.nombre AS producto,
             k.fecha,
             k.tipo_movimiento,
@@ -44,6 +46,9 @@ def kardex_producto(id_producto):
     movimientos = db.execute("""
         SELECT
             k.id,
+            k.id_producto,
+            p.codOrigi,
+            p.codigo,
             p.nombre AS producto,
             k.fecha,
             k.tipo_movimiento,
