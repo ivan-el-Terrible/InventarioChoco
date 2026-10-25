@@ -5,8 +5,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import Login from './pages/Login';
-
-// Páginas (Asegúrate de que la ruta del archivo exista)
+import Kardex from './pages/inventario/Kardex';
 import ListaProductos from './pages/inventario/ListaProductos';
 import EntradaStock from './pages/inventario/EntradaStock';
 import DashboardInv from './pages/inventario/DashboardInv';
@@ -31,6 +30,7 @@ export default function App() {
             <Route path="/inventario/productos" element={<ListaProductos />} />
             <Route path="/inventario/entradas" element={<EntradaStock />} />
             <Route path="/inventario/dashboard" element={<DashboardInv />} />
+            <Route path="/inventario/kardex" element={<Kardex />} />
             <Route path="/ventas" element={<VentasPro />} />
             <Route path="*" element={<Navigate to="/inventario/dashboard" replace />} />
           </Routes>

@@ -23,9 +23,13 @@ export default function Sidebar({ usuario = { nombre: 'Iván', rol: 'admin' }, a
     <aside className={`fixed inset-y-0 left-0 z-40 w-64 bg-slate-950 text-slate-300 flex flex-col justify-between border-r border-slate-800 transition-transform duration-200 lg:translate-x-0 ${abierto ? 'translate-x-0' : '-translate-x-full'}`}>
       <div>
         {/* Logo / Nombre del Negocio */}
-        <div className="p-6 border-b border-slate-800 flex items-center gap-3">
-          <div className="p-2 bg-blue-600 text-white rounded-xl font-bold">
-            <Package size={22} />
+        <div className="p-6 border-b border-slate-500 flex items-center gap-3">
+          <div className="p-2  text-white rounded-xl font-bold">
+            <img
+                src="/logo-repuestos.jpg"
+                alt="Logo Volvo Parts"
+                className="h-16 w-16 rounded-full object-contain"
+              />
           </div>
           <div>
             <h1 className="font-bold text-white text-base leading-tight">Inventario Choco</h1>
