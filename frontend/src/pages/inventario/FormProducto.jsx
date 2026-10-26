@@ -61,8 +61,9 @@ const [error, setError] = useState('');
     setGuardando(true);
 
     try {
-      const respuesta = await fetch('http://127.0.0.1:5000/productos', {
+      const respuesta = await fetch('http://localhost:5000/productos', {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json'
         },

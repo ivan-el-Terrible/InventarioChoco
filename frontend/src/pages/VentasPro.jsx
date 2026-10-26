@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Search, 
   ShoppingCart, 
@@ -13,21 +13,47 @@ import {
 } from 'lucide-react';
 
 export default function VentasPro() {
-  // Catálogo de productos disponibles (Simulación de consulta a SQLite)
-  const [productos] = useState([
-    { id: 1, codOrigen: '123', codigo: 'PROD-001', nombre: 'cruzetas', precio: 65.00, stock: 12 },
-    { id: 2, codOrigen: '456', codigo: 'PROD-002', nombre: 'correa dentada', precio: 30.00, stock: 5 },
-    { id: 3, codOrigen: '789', codigo: 'PROD-003', nombre: 'rodamientos', precio: 180.00, stock: 8 },
-    { id: 4, codOrigen: '012', codigo: 'PROD-004', nombre: 'pastillas', precio: 45.00, stock: 15 },
-    { id: 5, codOrigen: '345', codigo: 'PROD-005', nombre: 'baterías', precio: 15.00, stock: 20 },
-  ]);
+  const [productos, setProductos] = useState([]);
+  const [cargandoProductos, setCargandoProductos] = useState(true);
+  const [error, setError] = useState('');
+  const [guardando, setGuardando] = useState(false);
+  const [nombreCliente, setNombreCliente] = useState('Consumidor final');
+  const [ventaRegistrada, setVentaRegistrada] = useState(null);
+
+  const cargarProductos = async () => {
+    setCargandoProductos(true);
+    try {
+      const respuesta = await fetch('http://localhost:5000/ventas/productos', {
+        credentials: 'include',
+      });
+      const datos = await respuesta.json();
+      if (!respuesta.ok) throw new Error(datos.error || 'No se pudieron cargar los productos');
+      setProductos(datos.map((p) => ({
+        id: p.id,
+        codOrigen: p.codOrigi ?? '',
+        codigo: p.codigo ?? '',
+        nombre: p.nombre ?? '',
+        precio: Number(p.precio_venta ?? 0),
+        stock: Number(p.stock ?? 0),
+      })));
+      setError('');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setCargandoProductos(false);
+    }
+  };
+
+  useEffect(() => {
+    cargarProductos();
+  }, []);
 
   const [busqueda, setBusqueda] = useState('');
   const [carrito, setCarrito] = useState([]);
   const [metodoPago, setMetodoPago] = useState('efectivo');
   const [montoPagado, setMontoPagado] = useState('');
   const [ventaExitosa, setVentaExitosa] = useState(false);
-  const [conFactura, setConFactura] = useState(true); // estado nuevo para calcular el cambio si se paga con factura o sin factura
+  const [conFactura, setConFactura] = useState(true);
 
   // Filtrar productos
   const productosFiltrados = productos.filter(p =>
@@ -78,39 +104,89 @@ export default function VentasPro() {
     setCarrito(carrito.filter(item => item.id !== id));
   };
 
-  // Cálculos financieros
-  const subtotal = carrito.reduce((acc, item) => acc + (item.precio * item.cantidad), 0);
-  const impuesto = subtotal * 0.13; // Ejemplo IVA 13%
+  // Cálculos de venta
+  const subtotal = carrito.reduce(
+    (acc, item) => acc + item.precio * item.cantidad,
+    0
+  );
+
+  const impuesto = subtotal * 0.13;
+
   const total = subtotal + impuesto;
+
   const totalActual = conFactura ? total : subtotal;
-  const cambio = parseFloat(montoPagado)
-  ? Math.max(0, parseFloat(montoPagado) - totalActual)
-  : 0;
 
-  // Procesar venta
-  const procesarVenta = (e, conFactura) => {
+  const monto = Number(montoPagado);
+
+  const cambio = metodoPago === 'efectivo' &&
+    montoPagado !== '' &&
+    Number.isFinite(monto)
+      ? Math.max(0, monto - totalActual)
+    : 0;
+
+  const procesarVenta = async (e, emitirFactura) => {
     e.preventDefault();
-
+    const totalAPagar = emitirFactura ? total : subtotal;
+    if (guardando) return;
     if (carrito.length === 0) {
-      alert('El carrito está vacío');
+      setError('El carrito está vacío');
       return;
     }
-
-    const totalAPagar = conFactura ? total : subtotal;
-  
-    if (metodoPago === 'efectivo' && (parseFloat(montoPagado) < totalAPagar || !montoPagado)) {
-      alert('El monto pagado es insuficiente');
+    if (!nombreCliente.trim()) {
+      setError('Indica el nombre del cliente');
       return;
-      }
-
+    }
+    if ( metodoPago === 'efectivo' && ( montoPagado === '' || !Number.isFinite(monto) || monto < totalAPagar  ) ) {
+        setError('El monto pagado es insuficiente');
+        return;
+    }
+    setError('');
+    setGuardando(true);
+    try {
+      const respuesta = await fetch('http://localhost:5000/ventas', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nombre_cliente: nombreCliente.trim(),
+          forma_pago: metodoPago,
+          con_factura: emitirFactura,
+          detalles: carrito.map((item) => ({
+            id_producto: item.id,
+            cantidad: item.cantidad,
+          })),
+        }),
+      });
+      const datos = await respuesta.json();
+      if (!respuesta.ok) throw new Error(datos.error || 'No se pudo registrar la venta');
+      setConFactura(emitirFactura);
+      setVentaRegistrada({
+        id: datos.id_venta,
+        total: Number(datos.total),
+        metodoPago,
+        cambio: metodoPago === 'efectivo'
+                                ? Math.max(0, monto - totalAPagar)
+                                : 0,
+        emitirFactura,
+      });
       setVentaExitosa(true);
-      // Aquí se enviará la venta a Flask / Python en el futuro, incluyendo si es con o sin factura
-    }; 
+      await cargarProductos();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setGuardando(false);
+    }
+  };
 
   const nuevaVenta = () => {
     setCarrito([]);
     setMontoPagado('');
     setVentaExitosa(false);
+    setVentaRegistrada(null);
+    setBusqueda('');
+    setError('');
+    setNombreCliente('Consumidor final');
+    cargarProductos();
   };
 
 
@@ -120,6 +196,12 @@ export default function VentasPro() {
   return (
     <div className="flex flex-col lg:flex-row h-screen bg-slate-900 overflow-hidden">
       
+      {/* Mensajes de estado */}
+      {error && (
+        <div role="alert" className="absolute top-2 left-1/2 -translate-x-1/2 z-40 bg-red-100 border border-red-300 text-red-800 px-4 py-2 rounded-lg shadow-lg max-w-lg">
+          {error}
+        </div>
+      )}
       {/* SECCIÓN IZQUIERDA: Catálogo de Productos */}
       <div className="flex-1 p-6 flex flex-col overflow-hidden">
         
@@ -211,6 +293,8 @@ export default function VentasPro() {
                     </td>
                   </tr>
                 ))}
+                {cargandoProductos && <tr><td colSpan={5} className="p-4 text-center">Cargando productos...</td></tr>}
+                {!cargandoProductos && productosFiltrados.length === 0 && <tr><td colSpan={5} className="p-4 text-center">No hay productos para mostrar.</td></tr>}
               </tbody>
             </table>
 
@@ -276,18 +360,30 @@ export default function VentasPro() {
           )}
         </div>
 
+        {/* Cliente */}
+        <div className="px-4 pt-3 bg-slate-300">
+          <label className="block text-xs font-bold text-slate-700 mb-1">Nombre del cliente</label>
+          <input value={nombreCliente} onChange={(e) => setNombreCliente(e.target.value)}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            placeholder="Nombre del cliente" />
+        </div>
+
         {/* Totales y Métodos de Pago */}
         <div className="p-4 border-t border-slate-100 bg-slate-300 space-y-3">
           
           <div className="space-y-1 text-xs text-slate-600">
+
+            
             <div className="flex justify-between">
               <span>Subtotal:</span>
-              <span>${subtotal.toFixed(2)}</span>
+              <span>Bs {subtotal.toFixed(2)}</span>
             </div>
+
             <div className="flex justify-between">
-              <span>Impuesto (13%):</span>
-              <span>${impuesto.toFixed(2)}</span>
+              <span>Recargo calculado (13%):</span>
+              <span>Bs {impuesto.toFixed(2)}</span>
             </div>
+            
             <div className="flex justify-between text-base font-bold text-slate-900 pt-2 border-t border-slate-900">
               
               <span>Total sin factura:</span>
@@ -352,20 +448,22 @@ export default function VentasPro() {
 
           {/* Botón Completar Venta */}
           <button
-            onClick={ (e) => { setConFactura(true); procesarVenta(e, true); } }
-            disabled={carrito.length === 0}
-            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white rounded-xl font-bold transition-all shadow-md flex items-center justify-center gap-2 mt-2"
+            onClick={(e) => procesarVenta(e, true)}
+            disabled={carrito.length === 0 || guardando}
+            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition-all shadow-md flex items-center justify-center gap-2 mt-2"
           >
-            
-            <Receipt size={18} /> pagar con factura
+            <Receipt size={18} />
+            Registrar venta (con factura pendiente)
           </button>
-          
 
-          <button 
-          onClick={ (e) => { setConFactura(false); procesarVenta(e, false); } } 
-          disabled={carrito.length === 0} className="w-full py-3 bg-red-500 hover:bg-red-700 disabled:bg-slate-300 text-white rounded-xl font-bold transition-all shadow-md flex items-center justify-center gap-2 mt-2" 
+          <button
+            onClick={(e) => procesarVenta(e, false)}
+            disabled={carrito.length === 0 || guardando}
+            className="w-full py-3 bg-red-500 hover:bg-red-700 text-white rounded-xl font-bold transition-all shadow-md flex items-center justify-center gap-2 mt-2"
           >
-             <Receipt size={18} /> Procesar sin factura </button>
+            <Receipt size={18} />
+            Procesar sin factura
+          </button>
         </div>
       </div>
 
@@ -380,11 +478,12 @@ export default function VentasPro() {
             <h3 className="text-lg font-bold text-slate-800">¡Venta Registrada!</h3>
             <p className="text-xs text-slate-500 mt-1">El stock ha sido descontado del inventario automáticamente.</p>
             
+            <p className="text-xs text-slate-600 mt-2">Venta #{ventaRegistrada?.id}. {conFactura ? 'La factura fiscal aún debe emitirse por separado.' : 'Venta sin factura.'}</p>
             <div className="my-4 p-3 bg-slate-50 rounded-lg text-left text-xs space-y-1 border border-slate-200">
-              <div className="flex justify-between text-slate-600"><span>Monto Total:</span> <strong className="text-slate-800">${totalActual.toFixed(2)}</strong></div>
-              <div className="flex justify-between text-slate-600"><span>Método de Pago:</span> <strong className="uppercase text-slate-800">{metodoPago}</strong></div>
+              <div className="flex justify-between text-slate-600"><span>Monto Total:</span> <strong className="text-slate-800">${Number(ventaRegistrada?.total ?? totalActual).toFixed(2)}</strong></div>
+              <div className="flex justify-between text-slate-600"><span>Método de Pago:</span> <strong className="uppercase text-slate-800">{ventaRegistrada?.metodoPago}</strong></div>
               {metodoPago === 'efectivo' && (
-                <div className="flex justify-between text-slate-600"><span>Cambio Entregado:</span> <strong className="text-emerald-600">${cambio.toFixed(2)}</strong></div>
+                <div className="flex justify-between text-slate-600"><span>Cambio Entregado:</span> <strong className="text-emerald-600">${Number(ventaRegistrada?.cambio ?? cambio).toFixed(2)}</strong></div>
               )}
             </div>
 

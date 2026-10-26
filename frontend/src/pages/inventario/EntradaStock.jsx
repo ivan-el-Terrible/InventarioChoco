@@ -22,15 +22,21 @@ export default function EntradaStock() { //duda
 
   const cargarProductos = async () => {
     setCargando(true);
+    setError('');
 
     try {
-      const respuesta = await fetch('http://127.0.0.1:5000/productos');
-
-      if (!respuesta.ok) {
-        throw new Error('No se pudieron cargar los productos');
-      }
+      const respuesta = await fetch('http://localhost:5000/productos', {
+        method: 'GET',
+        credentials: 'include',
+      });
 
       const datos = await respuesta.json();
+
+      if (!respuesta.ok) {
+        throw new Error(
+          datos.error || `No se pudieron cargar los productos (${respuesta.status})`
+        );
+      }
 
       setProductos(datos.map(p => ({
         id: p.id,
@@ -39,17 +45,18 @@ export default function EntradaStock() { //duda
         nombre: p.nombre,
         stock: Number(p.stock ?? 0),
         costo: Number(p.precio_compra ?? 0),
-        costoPromedio: Number(p.costo_promedio ?? 0)
+        costoPromedio: Number(p.costo_promedio ?? 0),
       })));
 
-      setError('');
-
     } catch (err) {
+      console.error('Error al cargar productos:', err);
       setError(err.message);
     } finally {
       setCargando(false);
     }
   };
+
+
 
   useEffect(() => {
     cargarProductos();
@@ -83,9 +90,10 @@ export default function EntradaStock() { //duda
 
     try {
       const respuesta = await fetch(
-        `http://127.0.0.1:5000/productos/${productoId}/entrada`,
+        `http://localhost:5000/productos/${productoId}/entrada`,
         {
           method: 'POST',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json'
           },
@@ -277,10 +285,7 @@ export default function EntradaStock() { //duda
               </div>
             </div>
 
-            <p className="text-yellow-400 text-sm">
-              Cargando: {String(cargando)} |
-              Guardando: {String(guardando)}
-            </p>
+            
 
             <button
               type="submit"

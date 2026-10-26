@@ -1,45 +1,66 @@
 #logica para para agregar productos 
+from auth import roles_permitidos
 
-
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, session
 from database.database import get_db
 
 
 productos_bp = Blueprint("productos", __name__)
 
-
 @productos_bp.route("/productos", methods=["GET"])
+@roles_permitidos("admin", "vendedor")
 def obtener_productos():
 
     db = get_db()
 
-    productos = db.execute("""
-        SELECT
-            p.id,
-            p.codOrigi,
-            p.codigo,
-            p.nombre,
-            p.tipo,
-            p.descripcion,
-            p.marca,
-            p.stock,
-            p.precio_compra,
-            p.costo_promedio,
-            p.precio_venta,
-            p.id_proveedor,
-            pr.nomEmpresa AS proveedor      
-        FROM productos p
-        LEFT JOIN proveedores pr
-            ON p.id_proveedor = pr.id    
-        ORDER BY p.id DESC
-    """).fetchall()
+    try:
+        productos = db.execute("""
+            SELECT
+                p.id,
+                p.codOrigi,
+                p.codigo,
+                p.nombre,
+                p.tipo,
+                p.descripcion,
+                p.marca,
+                p.stock,
+                p.precio_compra,
+                p.costo_promedio,
+                p.precio_venta,
+                p.id_proveedor,
+                pr.nomEmpresa AS proveedor
+            FROM productos p
+            LEFT JOIN proveedores pr
+                ON p.id_proveedor = pr.id
+            ORDER BY p.id DESC
+        """).fetchall()
 
-    db.close()
+        es_admin = session.get("rol") == "admin"
 
-    return jsonify([dict(p) for p in productos])
+        resultado = []
+
+        for producto in productos:
+            datos = dict(producto)
+
+            if not es_admin:
+                datos.pop("precio_compra", None)
+                datos.pop("costo_promedio", None)
+                datos.pop("proveedor", None)
+                datos.pop("id_proveedor", None)
+
+            resultado.append(datos)
+
+        return jsonify(resultado), 200
+
+    finally:
+        db.close()
+
+
+
 
 """ahora agregaremos los productos """
 @productos_bp.route("/productos", methods=["POST"])
+@roles_permitidos("admin")
 def crear_producto():
 
     data = request.get_json()
@@ -73,8 +94,8 @@ def crear_producto():
                 precio_venta,
                 id_proveedor
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?
-        """, (
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)
+            """, (
             data.get("codOrigi"),
             data.get("codigo"),
             data["nombre"],
@@ -138,6 +159,7 @@ def crear_producto():
 # =========================================
 
 @productos_bp.route("/productos/<int:id_producto>/entrada", methods=["POST"])
+@roles_permitidos("admin")
 def registrar_entrada(id_producto):
 
     data = request.get_json(silent=True)
@@ -248,6 +270,82 @@ def registrar_entrada(id_producto):
         db.rollback()
         return jsonify({
             "error": "No se pudo registrar la entrada"
+        }), 500
+
+    finally:
+        db.close()
+
+
+
+# ==========================================
+# ACTUALIZAR PRECIO DE VENTA
+# ==========================================
+
+@productos_bp.route("/productos/<int:id_producto>/precio-venta", methods=["PATCH"])
+@roles_permitidos("admin")
+def actualizar_precio_venta(id_producto):
+
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({
+            "error": "Debes enviar datos JSON válidos"
+        }), 400
+
+    try:
+        precio_venta = float(data.get("precio_venta"))
+
+        if not (0 <= precio_venta < float("inf")):
+            return jsonify({
+                "error": "El precio de venta debe ser válido y no negativo"
+            }), 400
+
+    except (TypeError, ValueError, OverflowError):
+        return jsonify({
+            "error": "Precio de venta inválido"
+        }), 400
+
+    db = get_db()
+
+    try:
+        producto = db.execute("""
+            SELECT id, nombre, precio_venta
+            FROM productos
+            WHERE id = ?
+        """, (id_producto,)).fetchone()
+
+        if producto is None:
+            return jsonify({
+                "error": "Producto no encontrado"
+            }), 404
+
+        precio_anterior = producto["precio_venta"]
+
+        db.execute("""
+            UPDATE productos
+            SET precio_venta = ?
+            WHERE id = ?
+        """, (
+            precio_venta,
+            id_producto
+        ))
+
+        db.commit()
+
+        return jsonify({
+            "mensaje": "Precio de venta actualizado correctamente",
+            "id_producto": id_producto,
+            "nombre": producto["nombre"],
+            "precio_anterior": precio_anterior,
+            "precio_nuevo": precio_venta
+        }), 200
+
+    except Exception as e:
+        db.rollback()
+        print("ERROR AL ACTUALIZAR PRECIO:", repr(e))
+
+        return jsonify({
+            "error": "No se pudo actualizar el precio de venta"
         }), 500
 
     finally:

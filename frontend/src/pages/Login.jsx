@@ -2,16 +2,58 @@ import { useState } from 'react';
 import { Eye, EyeOff, LockKeyhole, Package, UserRound } from 'lucide-react';
 
 export default function Login({ onLogin }) {
-  const [email, setEmail] = useState('admin@choco.com');
-  const [password, setPassword] = useState('123456');
+
+  
+  
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [cargando, setCargando] = useState(false);
   const [mostrar, setMostrar] = useState(false);
   const [error, setError] = useState('');
 
-  const ingresar = (event) => {
+  
+  const ingresar = async (event) => {
     event.preventDefault();
-    if (!email.trim() || !password.trim()) return setError('Ingresa tu correo y contraseña.');
+
+    if (!email.trim() || !password.trim()) {
+      setError('Ingresa tu correo y contraseña.');
+      return;
+    }
+
     setError('');
-    onLogin({ nombre: email.toLowerCase().startsWith('admin') ? 'Iván' : email.split('@')[0], rol: email.toLowerCase().startsWith('admin') ? 'admin' : 'vendedor' });
+    setCargando(true);
+
+    try {
+      const respuesta = await fetch('http://localhost:5000/login', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          password,
+        }),
+      });
+
+      const resultado = await respuesta.json();
+
+      if (!respuesta.ok) {
+        throw new Error(resultado.error || 'No se pudo iniciar sesión.');
+      }
+
+      if (!resultado.usuario) {
+        throw new Error('El servidor no devolvió los datos del usuario.');
+      }
+
+      // Guardamos el usuario autenticado en el estado de App.jsx
+      onLogin(resultado.usuario);
+
+    } catch (error) {
+      setError(error.message || 'No se pudo conectar con el servidor.');
+    } finally {
+      setCargando(false);
+    }
   };
 
   return (
@@ -70,10 +112,13 @@ export default function Login({ onLogin }) {
             </div>
             {error && <p className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
             <button 
-              className="w-full rounded-xl bg-[#2563A6] py-3 text-sm font-bold text-white shadow-lg shadow-blue-900/30 transition hover:bg-[#347FC4]">Ingresar al sistema
+              type="submit"
+              disabled={cargando}
+              className="w-full rounded-xl bg-[#2563A6] py-3 text-sm font-bold text-white shadow-lg shadow-blue-900/30 transition hover:bg-[#347FC4] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {cargando ? 'Verificando credenciales...' : 'Ingresar al sistema'}
             </button>
           </form>
-          <p className="mt-6 text-center text-xs text-slate-200">Prueba local: admin@choco.com / 123456</p>
         </div>
         </div> {/* Cierre del contenedor del logo y formulario */}
       </section>
