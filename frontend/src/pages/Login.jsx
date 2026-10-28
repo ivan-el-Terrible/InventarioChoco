@@ -24,7 +24,7 @@ export default function Login({ onLogin }) {
     setCargando(true);
 
     try {
-      const respuesta = await fetch('http://localhost:5000/login', {
+      const respuesta = await fetch('/login', {
         method: 'POST',
         credentials: 'include',
         headers: {

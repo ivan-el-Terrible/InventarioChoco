@@ -63,3 +63,65 @@ env/
 
 *.tmp
 *.temp
+
+
+
+# =====================================
+# PYTHON / FLASK
+# =====================================
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# =====================================
+# BASES DE DATOS Y ARCHIVOS PRIVADOS
+# =====================================
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.key
+.env
+.env.*
+!.env.example
+
+# =====================================
+# REACT / VITE
+# =====================================
+node_modules/
+frontend/dist/
+frontend/.vite/
+coverage/
+*.log
+
+# =====================================
+# PYINSTALLER
+# =====================================
+backend/build/
+backend/dist/
+*.spec
+
+# =====================================
+# PAQUETES GENERADOS
+# =====================================
+*.zip
+*.tar.gz
+*.exe
+
+# =====================================
+# SISTEMA OPERATIVO
+# =====================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =====================================
+# EDITORES
+# =====================================
+.vscode/
+.idea/

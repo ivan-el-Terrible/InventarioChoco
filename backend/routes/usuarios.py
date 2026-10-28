@@ -10,6 +10,115 @@ from auth import login_requerido, roles_permitidos
 
 usuarios_bp = Blueprint("usuarios", __name__)
 
+# =========================================
+# VERIFICAR CONFIGURACION INICIAL
+# =========================================
+
+@usuarios_bp.route("/configuracion/estado", methods=["GET"])
+def estado_configuracion():
+
+    db = get_db()
+
+    try:
+        cantidad = db.execute("""
+            SELECT COUNT(*)
+            FROM usuarios
+        """).fetchone()[0]
+
+        return jsonify({
+            "requiere_configuracion": cantidad == 0
+        }), 200
+
+    finally:
+        db.close()
+
+
+# =========================================
+# CREAR PRIMER ADMINISTRADOR
+# =========================================
+
+@usuarios_bp.route("/configuracion/administrador", methods=["POST"])
+def crear_administrador_inicial():
+
+    datos = request.get_json(silent=True)
+
+    if not isinstance(datos, dict):
+        return jsonify({
+            "error": "Datos inválidos"
+        }), 400
+
+    nombre = str(datos.get("nombre") or "").strip()
+    email = str(datos.get("email") or "").strip().lower()
+    password = datos.get("password")
+
+    if not nombre or not email or not isinstance(password, str):
+        return jsonify({
+            "error": "Todos los campos son obligatorios"
+        }), 400
+
+    if "@" not in email:
+        return jsonify({
+            "error": "Correo electrónico inválido"
+        }), 400
+
+    if len(password) < 8:
+        return jsonify({
+            "error": "La contraseña debe tener al menos 8 caracteres"
+        }), 400
+
+    db = get_db()
+
+    try:
+        # Impedir dos configuraciones simultáneas
+        db.execute("BEGIN IMMEDIATE")
+
+        cantidad = db.execute("""
+            SELECT COUNT(*)
+            FROM usuarios
+        """).fetchone()[0]
+
+        if cantidad > 0:
+            db.rollback()
+
+            return jsonify({
+                "error": "El administrador inicial ya fue configurado"
+            }), 403
+
+        password_hash = generate_password_hash(password)
+
+        cursor = db.execute("""
+            INSERT INTO usuarios (
+                nombre,
+                email,
+                password,
+                rol,
+                activo
+            )
+            VALUES (?, ?, ?, 'admin', 1)
+        """, (
+            nombre,
+            email,
+            password_hash
+        ))
+
+        db.commit()
+
+        return jsonify({
+            "mensaje": "Administrador creado correctamente",
+            "id": cursor.lastrowid
+        }), 201
+
+    except Exception:
+        db.rollback()
+
+        return jsonify({
+            "error": "No se pudo crear el administrador"
+        }), 500
+
+    finally:
+        db.close()
+
+
 
 # =========================================
 # LISTAR USUARIOS

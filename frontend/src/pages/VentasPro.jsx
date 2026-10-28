@@ -23,7 +23,7 @@ export default function VentasPro() {
   const cargarProductos = async () => {
     setCargandoProductos(true);
     try {
-      const respuesta = await fetch('http://localhost:5000/ventas/productos', {
+      const respuesta = await fetch('/ventas/productos', {
         credentials: 'include',
       });
       const datos = await respuesta.json();
@@ -143,7 +143,7 @@ export default function VentasPro() {
     setError('');
     setGuardando(true);
     try {
-      const respuesta = await fetch('http://localhost:5000/ventas', {
+      const respuesta = await fetch('/ventas', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },

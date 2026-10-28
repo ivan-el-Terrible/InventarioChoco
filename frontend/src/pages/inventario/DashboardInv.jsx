@@ -8,7 +8,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 
-const API = 'http://localhost:5000';
+const API = '';
 
 const datosIniciales = {
   ventas_mes: 0,

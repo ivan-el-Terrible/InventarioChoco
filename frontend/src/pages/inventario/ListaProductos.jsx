@@ -24,7 +24,7 @@ export default function ListaProductos({ usuario }) {
     setCargando(true);
     setErrorProductos('');
     try {
-      const respuesta = await fetch('http://localhost:5000/productos', {
+      const respuesta = await fetch('/productos', {
         method: 'GET',
         credentials: 'include'
       });
@@ -83,7 +83,7 @@ export default function ListaProductos({ usuario }) {
     setErrorPrecio('');
     try {
       const respuesta = await fetch(
-        `http://localhost:5000/productos/${productoEditar.id}/precio-venta`,
+        `/productos/${productoEditar.id}/precio-venta`,
         {
           method: 'PATCH',
           credentials: 'include',

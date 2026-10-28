@@ -11,7 +11,7 @@ import {
   UserX
 } from 'lucide-react';
 
-const API = 'http://localhost:5000';
+const API = '';
 
 export default function Usuarios() {
   const [usuarios, setUsuarios] = useState([]);

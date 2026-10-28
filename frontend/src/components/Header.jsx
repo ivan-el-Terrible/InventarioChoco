@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { Bell, Menu, Search, Package, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-const API = 'http://localhost:5000';
+const API = '';
 
 export default function Header({ usuario, onMenu }) {
   const navigate = useNavigate();

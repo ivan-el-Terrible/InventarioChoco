@@ -4,7 +4,7 @@ import {
   Search, ClipboardList, Package, RotateCcw
 } from 'lucide-react';
 
-const API = 'http://localhost:5000';
+const API = '';
 
 function adaptarMovimiento(m) {
   const tipoOriginal = String(m.tipo_movimiento ?? '').toLowerCase();

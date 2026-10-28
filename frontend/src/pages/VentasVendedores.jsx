@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ReceiptText, Users, DollarSign } from 'lucide-react';
 
-const API = 'http://localhost:5000';
+const API = '';
 
 export default function VentasVendedores() {
   const [ventas, setVentas] = useState([]);
