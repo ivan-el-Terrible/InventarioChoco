@@ -1,28 +1,61 @@
-# Conexion y configuracion de la base de datos SQLite
 
-import sqlite3
+# Conexion y configuracion de SQLite
+
 import os
+import sys
+import sqlite3
+from pathlib import Path
 
 
-# Carpeta donde se encuentra este archivo
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# ==========================================
+# RUTAS DEL PROYECTO
+# ==========================================
 
-# Ruta de la base de datos
-DB_PATH = os.path.join(BASE_DIR, "inventario.db")
+# Carpeta donde esta database.py
+BASE_DIR = Path(__file__).resolve().parent
 
-# Ruta del schema
-SCHEMA_PATH = os.path.join(BASE_DIR, "schema.sql")
+# Detectar si estamos ejecutando un .exe
+ES_EJECUTABLE = getattr(sys, "frozen", False)
+
+# Base de datos de desarrollo
+DB_DESARROLLO = BASE_DIR / "inventario.db"
+
+# Base de datos del ejecutable
+if ES_EJECUTABLE:
+    carpeta_datos = Path(
+        os.environ.get(
+            "LOCALAPPDATA",
+            str(Path.home())
+        )
+    ) / "InventarioChoco"
+
+    carpeta_datos.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    DB_PATH = carpeta_datos / "inventario.db"
+
+else:
+    DB_PATH = DB_DESARROLLO  # Base de datos en la carpeta del proyecto
 
 
-# -----------------------------------------
+# Ruta del schema.sql
+if ES_EJECUTABLE:
+    SCHEMA_PATH = Path(sys._MEIPASS) / "database" / "schema.sql"
+else:
+    SCHEMA_PATH = BASE_DIR / "schema.sql"
+
+
+# ==========================================
 # CONEXION A LA BASE DE DATOS
-# -----------------------------------------
+# ==========================================
 
 def get_db():
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH))
 
-    # Permite acceder a las columnas por nombre
+    # Acceder a columnas por nombre
     conn.row_factory = sqlite3.Row
 
     # Activar claves foraneas
@@ -31,24 +64,55 @@ def get_db():
     return conn
 
 
-# -----------------------------------------
+# ==========================================
 # INICIALIZAR BASE DE DATOS
-# -----------------------------------------
+# ==========================================
 
 def init_db():
 
-    conn = sqlite3.connect(DB_PATH)
+    # Verificar si ya existe la base
+    base_nueva = not Path(DB_PATH).exists()
 
-    conn.execute("PRAGMA foreign_keys = ON")
+    conn = get_db()
 
-    # Leer schema.sql
-    with open(SCHEMA_PATH, "r", encoding="utf-8") as archivo:
-        schema = archivo.read()
+    try:
+        # Leer estructura de tablas
+        with open(
+            SCHEMA_PATH,
+            "r",
+            encoding="utf-8"
+        ) as archivo:
+            schema = archivo.read()
 
-    # Ejecutar todas las instrucciones SQL
-    conn.executescript(schema)
+        # Crear tablas si no existen
+        conn.executescript(schema)
 
-    conn.commit()
-    conn.close()
+        conn.commit()
 
-    print("Base de datos inicializada correctamente.")
+        if base_nueva:
+            print("Nueva base de datos creada.")
+        else:
+            print("Base de datos existente cargada.")
+
+        print(f"Ruta de SQLite: {DB_PATH}")
+
+    finally:
+        conn.close()
+
+def existe_administrador():
+    conn = get_db()
+
+    try:
+        resultado = conn.execute(
+            """
+            SELECT 1
+            FROM usuarios
+            WHERE rol = 'admin'
+            LIMIT 1
+            """
+        ).fetchone()
+
+        return resultado is not None
+
+    finally:
+        conn.close()
