@@ -1,11 +1,67 @@
+
 # ==========================================
-# FRONTEND - React / Vite / Node
+# INVENTARIOCHOCO - GITIGNORE
 # ==========================================
 
+# ==========================================
+# 1. PYTHON / FLASK
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+ENV/
+
+# ==========================================
+# 2. VARIABLES DE ENTORNO Y SEGURIDAD
+# ==========================================
+.env
+.env.*
+!.env.example
+
+# Claves y certificados privados
+*.key
+*.pem
+*.p12
+*.pfx
+
+# ==========================================
+# 3. BASES DE DATOS LOCALES
+# ==========================================
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Copias de seguridad
+*.db.bak
+*.sqlite.bak
+*.backup
+
+# ==========================================
+# 4. REACT / VITE / NODE.JS
+# ==========================================
 node_modules/
 dist/
 dist-ssr/
+.vite/
 *.local
+
+# Cachés
+.npm/
+.pnpm-store/
+coverage/
 
 # Logs
 logs/
@@ -17,111 +73,71 @@ pnpm-debug.log*
 lerna-debug.log*
 
 # ==========================================
-# BACKEND - Python
+# 5. PYINSTALLER / EJECUTABLES
 # ==========================================
+backend/build/
+backend/dist/
+build/
+dist/
 
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-*.pyc
+# Proyecto portable completo
+backend/InventarioChoco-Portable/
+InventarioChoco-Portable/
 
-# Entornos virtuales
-.venv/
-venv/
-env/
-
-# Variables de entorno
-.env
-.env.*
-
-# ==========================================
-# BASE DE DATOS LOCAL
-# ==========================================
-
-*.db
-*.sqlite
-*.sqlite3
+# Ejecutables y empaquetados
+*.exe
+*.msi
+*.spec
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.rar
 
 # ==========================================
-# EDITORES
+# 6. ARCHIVOS TEMPORALES
 # ==========================================
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
 
+# ==========================================
+# 7. EDITORES
+# ==========================================
 .vscode/*
 !.vscode/extensions.json
 .idea/
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+*.code-workspace
 
 # ==========================================
-# ARCHIVOS TEMPORALES
+# 8. SISTEMAS OPERATIVOS
 # ==========================================
-
-*.tmp
-*.temp
-
-
-
-# =====================================
-# PYTHON / FLASK
-# =====================================
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-env/
-.pytest_cache/
-
-# =====================================
-# BASES DE DATOS Y ARCHIVOS PRIVADOS
-# =====================================
-*.db
-*.db-journal
-*.db-wal
-*.db-shm
-*.sqlite
-*.sqlite3
-*.key
-.env
-.env.*
-!.env.example
-
-# =====================================
-# REACT / VITE
-# =====================================
-node_modules/
-frontend/dist/
-frontend/.vite/
-coverage/
-*.log
-
-# =====================================
-# PYINSTALLER
-# =====================================
-backend/build/
-backend/dist/
-*.spec
-
-# =====================================
-# PAQUETES GENERADOS
-# =====================================
-*.zip
-*.tar.gz
-*.exe
-
-# =====================================
-# SISTEMA OPERATIVO
-# =====================================
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# =====================================
-# EDITORES
-# =====================================
-.vscode/
-.idea/
+# ==========================================
+# 9. ARCHIVOS QUE SI SE CONSERVAN
+# ==========================================
+# Estos archivos NO se ignoran:
+#
+# backend/app.py
+# backend/auth.py
+# backend/config.py
+# backend/routes/
+# backend/database/database.py
+# backend/database/schema.sql
+# backend/database/insertarDatos.sql
+# backend/requirements.txt
+#
+# frontend/src/
+# frontend/public/
+# frontend/package.json
+# frontend/package-lock.json
+# frontend/vite.config.js
+#
+# README.md
+# .gitignore
