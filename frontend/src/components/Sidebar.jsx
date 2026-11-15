@@ -1,15 +1,16 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  Package, 
-  ShoppingCart, 
-  ArrowDownCircle, 
-  LogOut, 
-  ShieldCheck, 
-  User 
+import {
+  LayoutDashboard,
+  Package,
+  ShoppingCart,
+  ArrowDownCircle,
+  LogOut,
+  ShieldCheck,
+  User,
+  Users,
+  ReceiptText
 } from 'lucide-react';
-
 
 /*ste componente se encarga de la navegación entre los módulos. Oculta o muestra opciones 
 según el rol del usuario conectado (Administrador vs. Vendedor).*/
@@ -20,7 +21,7 @@ export default function Sidebar({ usuario = { nombre: 'Iván', rol: 'admin' }, a
   return (
     <>
     {abierto && <button aria-label="Cerrar menú" onClick={onClose} className="fixed inset-0 z-30 bg-slate-950/50 lg:hidden" />}
-    <aside className={`fixed inset-y-0 left-0 z-40 w-64 bg-slate-950 text-slate-300 flex flex-col justify-between border-r border-slate-800 transition-transform duration-200 lg:translate-x-0 ${abierto ? 'translate-x-0' : '-translate-x-full'}`}>
+    <aside className={`fixed inset-y-0 left-0 z-40 w-68 bg-slate-950 text-slate-300 flex flex-col justify-between border-r border-slate-800 transition-transform duration-200 lg:translate-x-0 ${abierto ? 'translate-x-0' : '-translate-x-full'}`}>
       <div>
         {/* Logo / Nombre del Negocio */}
         <div className="p-6 border-b border-slate-500 flex items-center gap-3">
@@ -69,6 +70,27 @@ export default function Sidebar({ usuario = { nombre: 'Iván', rol: 'admin' }, a
             <ShoppingCart size={18} />
             <span>Punto de ventas</span>
           </NavLink>
+
+
+
+
+          {/* ADMIN Y VENDEDOR: CONSULTAR PRODUCTOS */}
+          {!esAdmin && (
+            <NavLink
+              to="/inventario/productos"
+              onClick={onClose}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                  isActive
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'hover:bg-slate-800 text-slate-400 hover:text-slate-200'
+                }`
+              }
+            >
+              <Package size={18} />
+              <span>Lista de Productos</span>
+            </NavLink>
+          )}
 
           {/* SOLO ADMIN: Módulos restringidos de Inventario */}
           {esAdmin && (
@@ -127,6 +149,38 @@ export default function Sidebar({ usuario = { nombre: 'Iván', rol: 'admin' }, a
               >
                 <LayoutDashboard size={18} />
                 <span>Kardex General</span>
+              </NavLink>
+
+              {/* ADMINISTRAR USUARIOS */}
+              <NavLink
+                to="/administracion/usuarios"
+                onClick={onClose}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                    isActive
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'hover:bg-slate-800 text-slate-400 hover:text-slate-200'
+                  }`
+                }
+              >
+                <Users size={18} />
+                <span>Administrar Usuarios</span>
+              </NavLink>
+
+              {/* VENTAS POR VENDEDOR */}
+              <NavLink
+                to="/administracion/ventas"
+                onClick={onClose}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                    isActive
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'hover:bg-slate-800 text-slate-400 hover:text-slate-200'
+                  }`
+                }
+              >
+                <ReceiptText size={18} />
+                <span>Ventas por Vendedor</span>
               </NavLink>
             </>
           )}
