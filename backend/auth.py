@@ -25,7 +25,7 @@ def verificar_usuario_actual():
 
     try:
         usuario = db.execute("""
-            SELECT id, nombre, rol, activo
+            SELECT id, nombre, rol, activo, id_tienda
             FROM usuarios
             WHERE id = ?
         """, (usuario_id,)).fetchone()
@@ -46,6 +46,7 @@ def verificar_usuario_actual():
     # Mantener la información de sesión actualizada
     session["nombre"] = usuario["nombre"]
     session["rol"] = usuario["rol"]
+    session["id_tienda"] = usuario["id_tienda"]
 
     return usuario, None
 

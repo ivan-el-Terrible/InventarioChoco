@@ -81,7 +81,7 @@ export default function Login({ onLogin }) {
           <img
             src="/logo-repuestos.jpg"
             alt="Logo Repuestos Volvo Parts"
-            className="h-46 w-46 object-contain drop-shadow-xl"
+            className="h-44 w-44 object-contain drop-shadow-xl"
             />
 
           <div className="w-full max-w-md rounded-2xl border border-[#B8C4D0]/40 bg-[#25364B] p-7 shadow-xl shadow-black/30 sm:p-9">          <div className="mb-8">

@@ -1,6 +1,6 @@
 
-from flask import Blueprint, jsonify
-from database.database import get_db
+from flask import Blueprint, jsonify, request, session
+from database.database import get_db, tienda_actual, tienda_param
 from auth import roles_permitidos
 
 dashboard_bp = Blueprint("dashboard", __name__)
@@ -14,6 +14,14 @@ def obtener_dashboard():
     db = get_db()
 
     try:
+        # El administrador puede elegir la tienda cuyo panel quiere ver.
+        id_tienda = tienda_param(
+            db,
+            session.get("rol"),
+            session.get("id_tienda"),
+            request.args.get("id_tienda", type=int)
+        )
+
         # =========================================
         # 1. VENTAS DEL MES
         # =========================================
@@ -22,9 +30,12 @@ def obtener_dashboard():
                 COUNT(*) AS ordenes,
                 COALESCE(SUM(total), 0) AS ventas_mes
             FROM ventas
-            WHERE strftime('%Y-%m', fecha) =
+            WHERE id_tienda = ?
+              AND tipo = 'venta'
+              AND estado = 'completada'
+              AND strftime('%Y-%m', fecha) =
                   strftime('%Y-%m', 'now', 'localtime')
-        """).fetchone()
+        """, (id_tienda,)).fetchone()
 
         ventas_mes = float(resumen["ventas_mes"] or 0)
         ordenes = int(resumen["ordenes"] or 0)
@@ -38,25 +49,16 @@ def obtener_dashboard():
         # =========================================
         costos = db.execute("""
             SELECT
-                COALESCE(
-                    SUM(
-                        d.cantidad *
-                        COALESCE(
-                            p.costo_promedio,
-                            p.precio_compra,
-                            0
-                        )
-                    ),
-                    0
-                ) AS costo_total
+                COALESCE(SUM(d.cantidad * d.costo_unitario), 0) AS costo_total
             FROM detalle_ventas d
             INNER JOIN ventas v
                 ON v.id = d.id_venta
-            INNER JOIN productos p
-                ON p.id = d.id_producto
-            WHERE strftime('%Y-%m', v.fecha) =
+            WHERE v.id_tienda = ?
+              AND v.tipo = 'venta'
+              AND v.estado = 'completada'
+              AND strftime('%Y-%m', v.fecha) =
                   strftime('%Y-%m', 'now', 'localtime')
-        """).fetchone()
+        """, (id_tienda,)).fetchone()
 
         costo_total = float(costos["costo_total"] or 0)
 
@@ -72,9 +74,12 @@ def obtener_dashboard():
         # =========================================
         criticos = db.execute("""
             SELECT COUNT(*) AS cantidad
-            FROM productos
-            WHERE COALESCE(stock, 0) <= ?
-        """, (STOCK_CRITICO,)).fetchone()
+            FROM productos p
+            LEFT JOIN inventario i
+                ON i.id_producto = p.id AND i.id_tienda = ?
+            WHERE p.activo = 1
+              AND COALESCE(i.stock, 0) <= ?
+        """, (id_tienda, STOCK_CRITICO)).fetchone()
 
         productos_criticos = int(criticos["cantidad"] or 0)
 
@@ -91,12 +96,15 @@ def obtener_dashboard():
                 ON p.id = d.id_producto
             INNER JOIN ventas v
                 ON v.id = d.id_venta
-            WHERE strftime('%Y-%m', v.fecha) =
+            WHERE v.id_tienda = ?
+              AND v.tipo = 'venta'
+              AND v.estado = 'completada'
+              AND strftime('%Y-%m', v.fecha) =
                   strftime('%Y-%m', 'now', 'localtime')
             GROUP BY p.id, p.nombre
             ORDER BY cantidad_vendida DESC, p.nombre ASC
             LIMIT 5
-        """).fetchall()
+        """, (id_tienda,)).fetchall()
 
         productos_mas_vendidos = [
             {
@@ -112,26 +120,25 @@ def obtener_dashboard():
         # =========================================
         filas_inventario = db.execute("""
             SELECT
-                COALESCE(NULLIF(TRIM(tipo), ''), 'Sin categoría')
+                COALESCE(NULLIF(TRIM(p.categoria), ''), 'Sin categoría')
                     AS categoria,
                 COALESCE(
                     SUM(
-                        COALESCE(stock, 0) *
-                        COALESCE(
-                            costo_promedio,
-                            precio_compra,
-                            0
-                        )
+                        COALESCE(i.stock, 0) *
+                        COALESCE(i.costo_promedio, 0)
                     ),
                     0
                 ) AS valor
-            FROM productos
+            FROM productos p
+            LEFT JOIN inventario i
+                ON i.id_producto = p.id AND i.id_tienda = ?
+            WHERE p.activo = 1
             GROUP BY COALESCE(
-                NULLIF(TRIM(tipo), ''),
+                NULLIF(TRIM(p.categoria), ''),
                 'Sin categoría'
             )
             ORDER BY valor DESC
-        """).fetchall()
+        """, (id_tienda,)).fetchall()
 
         valor_inventario = [
             {

@@ -86,6 +86,15 @@ def crear_administrador_inicial():
 
         password_hash = generate_password_hash(password)
 
+        # La base en la nube exige al menos una tienda: si no existe, se crea.
+        tienda = db.execute("SELECT id FROM tiendas ORDER BY id LIMIT 1").fetchone()
+        if tienda is None:
+            nombre_tienda = str(datos.get("nombre_tienda") or "").strip()
+            db.execute(
+                "INSERT INTO tiendas (nombre) VALUES (?)",
+                (nombre_tienda or "Tienda Principal",)
+            )
+
         cursor = db.execute("""
             INSERT INTO usuarios (
                 nombre,
@@ -137,6 +146,7 @@ def obtener_usuarios():
             nombre,
             email,
             rol,
+            id_tienda,
             activo,
             fecha_creacion
         FROM usuarios
@@ -186,20 +196,51 @@ def crear_usuario():
 
     try:
 
+        # En la nube un vendedor siempre pertenece a una tienda y un
+        # administrador nunca lleva tienda (CHECK de la tabla usuarios).
+        id_tienda = None
+        if rol == "vendedor":
+            id_tienda = data.get("id_tienda")
+            if id_tienda:
+                # La tienda debe existir y estar activa (viene del selector).
+                try:
+                    id_tienda = int(id_tienda)
+                except (TypeError, ValueError):
+                    return jsonify({"error": "Tienda inválida"}), 400
+                tienda = db.execute(
+                    "SELECT id FROM tiendas WHERE id = ? AND activo = 1",
+                    (id_tienda,)
+                ).fetchone()
+                if tienda is None:
+                    return jsonify({"error": "La tienda indicada no existe"}), 400
+                id_tienda = tienda["id"]
+            else:
+                tienda = db.execute(
+                    "SELECT id FROM tiendas WHERE activo = 1 ORDER BY id LIMIT 1"
+                ).fetchone()
+                if tienda is None:
+                    return jsonify({
+                        "error": "No hay tiendas registradas. "
+                                 "Configura el sistema inicial primero."
+                    }), 400
+                id_tienda = tienda["id"]
+
         cursor = db.execute("""
             INSERT INTO usuarios (
                 nombre,
                 email,
                 password,
                 rol,
+                id_tienda,
                 activo
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
         """, (
             nombre,
             email,
             password_hash,
             rol,
+            id_tienda,
             1  # activo 
         ))
 
@@ -270,6 +311,7 @@ def login():
     session["usuario_id"] = usuario["id"]
     session["nombre"] = usuario["nombre"]
     session["rol"] = usuario["rol"]
+    session["id_tienda"] = usuario["id_tienda"]
 
     return jsonify({
         "mensaje": "Login correcto",

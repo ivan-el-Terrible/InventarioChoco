@@ -11,6 +11,7 @@ import {
   CheckCircle, 
   Receipt 
 } from 'lucide-react';
+import useAutoRefetch from '../hooks/useAutoRefetch';
 
 export default function VentasPro() {
   const [productos, setProductos] = useState([]);
@@ -20,33 +21,45 @@ export default function VentasPro() {
   const [nombreCliente, setNombreCliente] = useState('Consumidor final');
   const [ventaRegistrada, setVentaRegistrada] = useState(null);
 
-  const cargarProductos = async () => {
-    setCargandoProductos(true);
+  // silencioso = true evita el parpadeo de "Cargando" en la auto-actualización.
+  const cargarProductos = async (silencioso = false) => {
+    if (!silencioso) setCargandoProductos(true);
     try {
       const respuesta = await fetch('/ventas/productos', {
         credentials: 'include',
       });
       const datos = await respuesta.json();
       if (!respuesta.ok) throw new Error(datos.error || 'No se pudieron cargar los productos');
-      setProductos(datos.map((p) => ({
+      const lista = datos.map((p) => ({
         id: p.id,
         codOrigen: p.codOrigi ?? '',
         codigo: p.codigo ?? '',
         nombre: p.nombre ?? '',
         precio: Number(p.precio_venta ?? 0),
         stock: Number(p.stock ?? 0),
-      })));
+      }));
+      setProductos(lista);
+      // Si el admin cambió un precio mientras el carrito está abierto,
+      // el carrito se actualiza solo con el precio vigente.
+      setCarrito((anterior) => anterior.map((item) => {
+        const actual = lista.find((p) => p.id === item.id);
+        return actual ? { ...item, precio: actual.precio, stock: actual.stock } : item;
+      }));
       setError('');
     } catch (err) {
-      setError(err.message);
+      if (!silencioso) setError(err.message);
     } finally {
-      setCargandoProductos(false);
+      if (!silencioso) setCargandoProductos(false);
     }
   };
 
   useEffect(() => {
     cargarProductos();
   }, []);
+
+  // Precios y stock se refrescan solos: la página del vendedor siempre
+  // muestra lo último sin tener que recargar.
+  useAutoRefetch(() => { cargarProductos(true); }, 15000);
 
   const [busqueda, setBusqueda] = useState('');
   const [carrito, setCarrito] = useState([]);
@@ -194,7 +207,7 @@ export default function VentasPro() {
   /*de aqui para abajo es el codigo de la pagina de ventas, es decir el html y css de la pagina de ventas */
 
   return (
-    <div className="flex flex-col lg:flex-row h-screen bg-slate-900 overflow-hidden">
+    <div className="flex flex-col lg:flex-row h-[calc(100vh-4rem)] bg-slate-900 overflow-hidden">
       
       {/* Mensajes de estado */}
       {error && (
@@ -206,12 +219,12 @@ export default function VentasPro() {
       <div className="flex-1 p-6 flex flex-col overflow-hidden">
         
         {/* Cabecera y Buscador */}
-        <div className="mb-6 flex justify-between items-center gap-4">
+        <div className="mb-6 flex flex-wrap justify-between items-center gap-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-100">Punto de Venta</h1>
             <p className="text-slate-200 text-xs">Selecciona o busca productos para agregar a la nota de venta</p>
           </div>
-          <div className="relative w-72">
+          <div className="relative w-full sm:w-72">
             <Search className=" absolute left-3 top-2.5 text-slate-400" size={18} />
             <input
               type="text"
@@ -237,7 +250,7 @@ export default function VentasPro() {
                     Código
                   </th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-100">
-                    Producto
+                    Nombre Producto
                   </th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-100">
                     Precio
@@ -306,7 +319,7 @@ export default function VentasPro() {
       <div className="w-full lg:w-96 bg-slate-00 border-l border-slate-200 flex flex-col h-full shadow-lg">
         
         {/* Encabezado del Carrito */}
-        <div className="p-4 border-b border-slate-200 flex items-center gap-2 bg-slate-500">
+        <div className="p-3 border-b border-slate-200 flex items-center gap-2 bg-slate-500 shrink-0">
           <ShoppingCart className="text-red-500" size={25} />
           <h2 className="font-bold text-slate-100">Orden de Venta</h2>
           <span className="ml-auto bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">
@@ -315,7 +328,7 @@ export default function VentasPro() {
         </div>
 
         {/* Lista de Ítems en Carrito */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3 divide-y divide-slate-100">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3 divide-y divide-slate-100">
           {carrito.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-slate-400 text-center p-6">
               <ShoppingCart size={48} className="mb-2 stroke-1 text-red-500" />
@@ -332,17 +345,17 @@ export default function VentasPro() {
                 
                 {/* Controles de Cantidad */}
                 <div className="flex items-center gap-2">
-                  <div className="flex items-center border border-blue-500 rounded-lg bg-slate-200">
+                  <div className="flex items-center border border-blue-500 rounded-lg bg-slate-200 h-7">
                     <button
                       onClick={() => cambiarCantidad(item.id, -1)}
-                      className="p-1 hover:bg-slate-400 text-slate-900 rounded-l-lg"
+                      className="px-1.5 h-full hover:bg-slate-400 text-slate-900 rounded-l-lg"
                     >
                       <Minus size={14} />
                     </button>
-                    <span className="px-2 text-xs font-bold text-black-500">{item.cantidad}</span>
+                    <span className="px-1 text-xs font-bold text-black leading-none">{item.cantidad}</span>
                     <button
                       onClick={() => cambiarCantidad(item.id, 1)}
-                      className="p-1 hover:bg-slate-400 text-slate-900 rounded-r-lg"
+                      className="px-1.5 h-full hover:bg-slate-400 text-slate-900 rounded-r-lg"
                     >
                       <Plus size={14} />
                     </button>
@@ -361,17 +374,17 @@ export default function VentasPro() {
         </div>
 
         {/* Cliente */}
-        <div className="px-4 pt-3 bg-slate-300">
+        <div className="px-4 pt-2 pb-1 bg-slate-300 shrink-0">
           <label className="block text-xs font-bold text-slate-700 mb-1">Nombre del cliente</label>
           <input value={nombreCliente} onChange={(e) => setNombreCliente(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
             placeholder="Nombre del cliente" />
         </div>
 
         {/* Totales y Métodos de Pago */}
-        <div className="p-4 border-t border-slate-100 bg-slate-300 space-y-3">
+        <div className="px-4 py-3 border-t border-slate-100 bg-slate-300 space-y-2 shrink-0 max-h-[70%] overflow-y-auto">
           
-          <div className="space-y-1 text-xs text-slate-600">
+          <div className="space-y-0.5 text-xs text-slate-600">
 
             
             <div className="flex justify-between">
@@ -384,23 +397,51 @@ export default function VentasPro() {
               <span>Bs {impuesto.toFixed(2)}</span>
             </div>
             
-            <div className="flex justify-between text-base font-bold text-slate-900 pt-2 border-t border-slate-900">
+            <div className="flex justify-between text-sm font-bold text-slate-900 pt-1 border-t border-slate-900">
               
               <span>Total sin factura:</span>
               <span className="text-red-600">${subtotal.toFixed(2)}</span>
             </div>
-            <div className="flex justify-between text-base font-bold text-slate-900 pt-2 border-t border-slate-900">
+            <div className="flex justify-between text-sm font-bold text-slate-900 pt-1 border-t border-slate-900">
               
               <span>Total con factura:</span>
               <span className="text-blue-600">${total.toFixed(2)}</span>
             </div>
           </div>
 
+          {/* Selección de cobro: con o sin factura (define cuánto se cobra) */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setConFactura(false)}
+              className={`p-1.5 rounded-lg border text-xs font-bold flex items-center justify-center gap-1 ${
+                !conFactura ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-700'
+              }`}
+            >
+              Cobrar sin factura
+            </button>
+            <button
+              type="button"
+              onClick={() => setConFactura(true)}
+              className={`p-1.5 rounded-lg border text-xs font-bold flex items-center justify-center gap-1 ${
+                conFactura ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-700'
+              }`}
+            >
+              Cobrar con factura
+            </button>
+          </div>
+          <div className="flex justify-between text-sm font-bold text-slate-900">
+            <span>Total a cobrar:</span>
+            <span className={conFactura ? 'text-blue-600' : 'text-red-600'}>
+              ${totalActual.toFixed(2)}
+            </span>
+          </div>
+
           {/* Selección Método de Pago */}
-          <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-900">
+          <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-900">
             <button
               onClick={() => setMetodoPago('efectivo')}
-              className={`p-2 rounded-lg border text-xs font-medium flex flex-col items-center gap-1 ${
+              className={`p-1.5 rounded-lg border text-xs font-medium flex flex-col items-center gap-0.5 ${
                 metodoPago === 'efectivo' ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-700'
               }`}
             >
@@ -408,7 +449,7 @@ export default function VentasPro() {
             </button>
             <button
               onClick={() => setMetodoPago('tarjeta')}
-              className={`p-2 rounded-lg border text-xs font-medium flex flex-col items-center gap-1 ${
+              className={`p-1.5 rounded-lg border text-xs font-medium flex flex-col items-center gap-0.5 ${
                 metodoPago === 'tarjeta' ? 'bg-red-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-700'
               }`}
             >
@@ -416,7 +457,7 @@ export default function VentasPro() {
             </button>
             <button
               onClick={() => setMetodoPago('qr')}
-              className={`p-2 rounded-lg border text-xs font-medium flex flex-col items-center gap-1 ${
+              className={`p-1.5 rounded-lg border text-xs font-medium flex flex-col items-center gap-0.5 ${
                 metodoPago === 'qr' ? 'bg-red-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-700'
               }`}
             >
@@ -428,41 +469,69 @@ export default function VentasPro() {
           {metodoPago === 'efectivo' && (
             <div className="grid grid-cols-2 gap-2 pt-1">
               <div>
-                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Monto Entregado</label>
+                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Monto Entregado</label>
                 <input
                   type="number"
                   placeholder="0.00"
                   value={montoPagado}
                   onChange={(e) => setMontoPagado(e.target.value)}
-                  className="w-full p-2 border border-slate-300 rounded-lg text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full p-1.5 border border-slate-300 rounded-lg text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
               <div>
-                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Cambio a Devolver</label>
-                <div className="p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-sm font-bold text-emerald-700">
+                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">Cambio a Devolver</label>
+                <div className="p-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-sm font-bold text-emerald-700">
                   ${cambio.toFixed(2)}
                 </div>
               </div>
             </div>
           )}
 
+          {/* Resumen de la compra: productos, precio pagado y cambio */}
+          {carrito.length > 0 && (
+            <div className="rounded-xl border border-slate-300 bg-white p-2 space-y-1 text-[11px] text-slate-700 max-h-24 overflow-y-auto">
+              <p className="font-bold text-slate-900 text-[11px] uppercase">
+                Productos de esta compra
+              </p>
+              {carrito.map((item) => (
+                <div key={item.id} className="flex justify-between gap-2">
+                  <span className="truncate">
+                    {item.cantidad} × {item.nombre}
+                  </span>
+                  <span className="font-semibold whitespace-nowrap">
+                    ${(item.precio * item.cantidad).toFixed(2)}
+                  </span>
+                </div>
+              ))}
+              <div className="flex justify-between border-t border-slate-200 pt-1 font-bold text-slate-900">
+                <span>Precio a pagar {conFactura ? '(con factura)' : '(sin factura)'}:</span>
+                <span>${totalActual.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Monto pagado:</span>
+                <span>
+                  {metodoPago === 'efectivo' && montoPagado !== '' && Number.isFinite(Number(montoPagado))
+                    ? `$${Number(montoPagado).toFixed(2)}`
+                    : metodoPago === 'efectivo'
+                      ? '—'
+                      : `Pagado con ${metodoPago}`}
+                </span>
+              </div>
+              <div className="flex justify-between font-bold text-emerald-700">
+                <span>Cambio a devolver:</span>
+                <span>${cambio.toFixed(2)}</span>
+              </div>
+            </div>
+          )}
+
           {/* Botón Completar Venta */}
           <button
-            onClick={(e) => procesarVenta(e, true)}
+            onClick={(e) => procesarVenta(e, conFactura)}
             disabled={carrito.length === 0 || guardando}
-            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition-all shadow-md flex items-center justify-center gap-2 mt-2"
+            className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition-all shadow-md flex items-center justify-center gap-2"
           >
             <Receipt size={18} />
-            Registrar venta (con factura pendiente)
-          </button>
-
-          <button
-            onClick={(e) => procesarVenta(e, false)}
-            disabled={carrito.length === 0 || guardando}
-            className="w-full py-3 bg-red-500 hover:bg-red-700 text-white rounded-xl font-bold transition-all shadow-md flex items-center justify-center gap-2 mt-2"
-          >
-            <Receipt size={18} />
-            Procesar sin factura
+            {conFactura ? 'Registrar venta (con factura)' : 'Registrar venta (sin factura)'}
           </button>
         </div>
       </div>

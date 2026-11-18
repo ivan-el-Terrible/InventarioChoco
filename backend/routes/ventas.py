@@ -1,6 +1,6 @@
-# Rutas de ventas: acceso por sesión, stock y Kardex.
+# Rutas de ventas: acceso por sesión, stock en inventario y Kardex.
 from flask import Blueprint, request, jsonify, session
-from database.database import get_db
+from database.database import get_db, tienda_actual, tienda_param
 from auth import roles_permitidos
 
 ventas_bp = Blueprint('ventas', __name__)
@@ -11,11 +11,18 @@ ventas_bp = Blueprint('ventas', __name__)
 def productos_para_venta():
     db = get_db()
     try:
+        id_tienda = tienda_actual(db, session.get('id_tienda'))
         productos = db.execute('''
-            SELECT id, codOrigi, codigo, nombre, tipo, marca, stock, precio_venta
-            FROM productos
-            ORDER BY nombre
-        ''').fetchall()
+            SELECT p.id, p.cod_origen AS codOrigi, p.codigo, p.nombre,
+                   p.categoria AS tipo, p.marca,
+                   COALESCE(i.stock, 0) AS stock,
+                   COALESCE(i.precio_venta, 0) AS precio_venta
+            FROM productos p
+            LEFT JOIN inventario i
+                ON i.id_producto = p.id AND i.id_tienda = ?
+            WHERE p.activo = 1
+            ORDER BY p.nombre
+        ''', (id_tienda,)).fetchall()
         return jsonify([dict(p) for p in productos])
     finally:
         db.close()
@@ -26,6 +33,14 @@ def productos_para_venta():
 def obtener_ventas():
     db = get_db()
     try:
+        # El administrador puede elegir la tienda; el vendedor solo la suya.
+        id_tienda = tienda_param(
+            db,
+            session.get('rol'),
+            session.get('id_tienda'),
+            request.args.get('id_tienda', type=int)
+        )
+
         consulta = '''
             SELECT
                 v.id,
@@ -34,6 +49,8 @@ def obtener_ventas():
                 v.total,
                 v.forma_pago,
                 v.id_vendedor,
+                v.id_tienda,
+                t.nombre AS tienda,
                 u.nombre AS vendedor,
 
                 (
@@ -55,17 +72,20 @@ def obtener_ventas():
             FROM ventas v
             LEFT JOIN usuarios u
                 ON v.id_vendedor = u.id
+            LEFT JOIN tiendas t
+                ON v.id_tienda = t.id
+            WHERE v.id_tienda = ?
         '''
 
-        parametros = ()
+        parametros = [id_tienda]
 
         if session.get('rol') != 'admin':
-            consulta += ' WHERE v.id_vendedor = ?'
-            parametros = (session['usuario_id'],)
+            consulta += ' AND v.id_vendedor = ?'
+            parametros.append(session['usuario_id'])
 
         consulta += ' ORDER BY v.id DESC'
 
-        ventas = db.execute(consulta, parametros).fetchall()
+        ventas = db.execute(consulta, tuple(parametros)).fetchall()
 
         return jsonify([dict(v) for v in ventas])
 
@@ -78,14 +98,15 @@ def obtener_ventas():
 def obtener_venta(id_venta):
     db = get_db()
     try:
+        id_tienda = tienda_actual(db, session.get('id_tienda'))
         consulta = '''
             SELECT v.id, v.fecha, v.nombre_cliente, v.total,
                    v.forma_pago, v.id_vendedor, u.nombre AS vendedor
             FROM ventas v
             LEFT JOIN usuarios u ON v.id_vendedor = u.id
-            WHERE v.id = ?
+            WHERE v.id = ? AND v.id_tienda = ?
         '''
-        parametros = [id_venta]
+        parametros = [id_venta, id_tienda]
         if session.get('rol') != 'admin':
             consulta += ' AND v.id_vendedor = ?'
             parametros.append(session['usuario_id'])
@@ -95,7 +116,7 @@ def obtener_venta(id_venta):
 
         detalles = db.execute('''
             SELECT dv.id, dv.id_producto, p.nombre AS producto,
-                   dv.cantidad, dv.precio_venta_Real, dv.subtotal
+                   dv.cantidad, dv.precio_venta_real, dv.sub_total
             FROM detalle_ventas dv
             INNER JOIN productos p ON dv.id_producto = p.id
             WHERE dv.id_venta = ?
@@ -150,15 +171,22 @@ def registrar_venta():
 
     db = get_db()
     try:
+        id_tienda = tienda_actual(db, session.get('id_tienda'))
         # Impide que dos ventas simultáneas consuman las mismas existencias.
         db.execute('BEGIN IMMEDIATE')
         productos = []
         total = 0.0
         for id_producto, cantidad in cantidades.items():
             producto = db.execute('''
-                SELECT id, nombre, stock, precio_venta, costo_promedio
-                FROM productos WHERE id = ?
-            ''', (id_producto,)).fetchone()
+                SELECT p.id, p.nombre,
+                       COALESCE(i.stock, 0) AS stock,
+                       COALESCE(i.precio_venta, 0) AS precio_venta,
+                       COALESCE(i.costo_promedio, 0) AS costo_promedio
+                FROM productos p
+                LEFT JOIN inventario i
+                    ON i.id_producto = p.id AND i.id_tienda = ?
+                WHERE p.id = ?
+            ''', (id_tienda, id_producto)).fetchone()
             if producto is None:
                 raise ValueError(f'El producto {id_producto} no existe')
             if producto['stock'] < cantidad:
@@ -180,18 +208,20 @@ def registrar_venta():
 
         cursor = db.execute('''
             INSERT INTO ventas (
+                id_tienda,
+                id_vendedor,
                 nombre_cliente,
                 total,
                 forma_pago,
-                id_vendedor,
                 con_factura
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
         ''', (
+            id_tienda,
+            id_vendedor,
             nombre_cliente.strip(),
             total,
             forma_pago.strip(),
-            id_vendedor,
             int(con_factura)
         ))
 
@@ -202,18 +232,25 @@ def registrar_venta():
             stock_nuevo = stock_anterior - cantidad
             db.execute('''
                 INSERT INTO detalle_ventas
-                    (id_venta, id_producto, cantidad, precio_venta_Real, subtotal)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (id_venta, producto['id'], cantidad, precio, subtotal))
-            db.execute('UPDATE productos SET stock = ? WHERE id = ?',
-                       (stock_nuevo, producto['id']))
+                    (id_venta, id_producto, cantidad,
+                     precio_venta_real, costo_unitario, sub_total)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (id_venta, producto['id'], cantidad, precio, costo, subtotal))
+            db.execute('''
+                UPDATE inventario
+                SET stock = ?, actualizado_en = CURRENT_TIMESTAMP
+                WHERE id_tienda = ? AND id_producto = ?
+            ''', (stock_nuevo, id_tienda, producto['id']))
             db.execute('''
                 INSERT INTO kardex
-                    (id_producto, tipo_movimiento, motivo, referencia_id,
-                     cantidad, stock_anterior, stock_nuevo, precio_unitario)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (producto['id'], 'salida', 'venta', id_venta, cantidad,
-                  stock_anterior, stock_nuevo, costo))
+                    (id_tienda, id_producto, id_usuario, tipo_movimiento,
+                     motivo, referencia_id, cantidad, stock_anterior,
+                     stock_nuevo, costo_unitario, costo_promedio_anterior,
+                     costo_promedio_nuevo)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (id_tienda, producto['id'], id_vendedor, 'venta', 'venta',
+                  id_venta, cantidad, stock_anterior, stock_nuevo, costo,
+                  costo, costo))
 
         db.commit()
         return jsonify({
@@ -232,4 +269,3 @@ def registrar_venta():
         raise
     finally:
         db.close()
-        
