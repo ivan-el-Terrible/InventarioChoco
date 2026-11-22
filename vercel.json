@@ -1,0 +1,25 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    { "source": "/login",             "destination": "/api/index", "has": [{ "type": "header", "key": "accept", "value": "^((?!text/html).)*$" }] },
+    { "source": "/logout",            "destination": "/api/index", "has": [{ "type": "header", "key": "accept", "value": "^((?!text/html).)*$" }] },
+    { "source": "/sesion",            "destination": "/api/index", "has": [{ "type": "header", "key": "accept", "value": "^((?!text/html).)*$" }] },
+    { "source": "/usuarios/:path*",   "destination": "/api/index", "has": [{ "type": "header", "key": "accept", "value": "^((?!text/html).)*$" }] },
+    { "source": "/configuracion/:path*", "destination": "/api/index", "has": [{ "type": "header", "key": "accept", "value": "^((?!text/html).)*$" }] },
+    { "source": "/productos/:path*",  "destination": "/api/index", "has": [{ "type": "header", "key": "accept", "value": "^((?!text/html).)*$" }] },
+    { "source": "/tiendas/:path*",    "destination": "/api/index", "has": [{ "type": "header", "key": "accept", "value": "^((?!text/html).)*$" }] },
+    { "source": "/ventas/:path*",      "destination": "/api/index", "has": [{ "type": "header", "key": "accept", "value": "^((?!text/html).)*$" }] },
+    { "source": "/devoluciones/:path*", "destination": "/api/index", "has": [{ "type": "header", "key": "accept", "value": "^((?!text/html).)*$" }] },
+    { "source": "/kardex/:path*",     "destination": "/api/index", "has": [{ "type": "header", "key": "accept", "value": "^((?!text/html).)*$" }] },
+    { "source": "/dashboard/:path*",   "destination": "/api/index", "has": [{ "type": "header", "key": "accept", "value": "^((?!text/html).)*$" }] },
+    { "source": "/gastos/:path*",     "destination": "/api/index", "has": [{ "type": "header", "key": "accept", "value": "^((?!text/html).)*$" }] },
+    { "source": "/mantenimiento/:path*", "destination": "/api/index", "has": [{ "type": "header", "key": "accept", "value": "^((?!text/html).)*$" }] },
+    { "source": "/api/:path*",        "destination": "/api/index" },
+    { "source": "/(.*)",              "destination": "/index.html" }
+  ]
+}

@@ -1,0 +1,9 @@
+# No subir al desplegar en Vercel
+.env
+.env.*
+frontend/node_modules
+backend/database/inventario.db
+backend/database/inventario.viejo.db
+backend/__pycache__
+**/__pycache__
+*.pyc
