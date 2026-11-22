@@ -8,13 +8,15 @@ import {
   X,
   Trash2,
   UserCheck,
-  UserX
+  UserX,
+  Store
 } from 'lucide-react';
 
 const API = '';
 
 export default function Usuarios() {
   const [usuarios, setUsuarios] = useState([]);
+  const [tiendas, setTiendas] = useState([]);
   const [modalAbierto, setModalAbierto] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [procesandoId, setProcesandoId] = useState(null);
@@ -26,7 +28,8 @@ export default function Usuarios() {
     nombre: '',
     email: '',
     password: '',
-    rol: 'vendedor'
+    rol: 'vendedor',
+    id_tienda: ''
   });
 
   // =========================================
@@ -74,6 +77,17 @@ export default function Usuarios() {
 
         setUsuarios(datosUsuarios);
         setUsuarioActualId(datosSesion.usuario.id);
+
+        // Lista de tiendas para asignar al nuevo vendedor.
+        try {
+          const resTiendas = await fetch(`${API}/tiendas`, { credentials: 'include' });
+          if (resTiendas.ok) {
+            const datosTiendas = await resTiendas.json();
+            if (Array.isArray(datosTiendas)) setTiendas(datosTiendas);
+          }
+        } catch {
+          /* sin lista de tiendas: se usará la tienda por defecto */
+        }
       } catch (err) {
         setError(err.message);
       }
@@ -115,7 +129,8 @@ export default function Usuarios() {
         nombre: '',
         email: '',
         password: '',
-        rol: 'vendedor'
+        rol: 'vendedor',
+        id_tienda: ''
       });
 
       setMensaje('Usuario creado correctamente');
@@ -319,6 +334,7 @@ export default function Usuarios() {
               <th className="p-4">Nombre</th>
               <th className="p-4">Correo electrónico</th>
               <th className="p-4">Rol</th>
+              <th className="p-4">Tienda</th>
               <th className="p-4">Estado</th>
               <th className="p-4">Fecha de registro</th>
               <th className="p-4 text-center">Acciones</th>
@@ -367,6 +383,13 @@ export default function Usuarios() {
                         ? 'Administrador'
                         : 'Vendedor'}
                     </span>
+                  </td>
+
+                  <td className="p-4 text-slate-300">
+                    {u.rol === 'admin'
+                      ? '—'
+                      : tiendas.find((t) => t.id === u.id_tienda)?.nombre
+                        || 'Sin asignar'}
                   </td>
 
                   <td className="p-4">
@@ -449,7 +472,7 @@ export default function Usuarios() {
             {usuarios.length === 0 && (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={7}
                   className="p-8 text-center text-slate-400"
                 >
                   No hay usuarios registrados.
@@ -463,7 +486,7 @@ export default function Usuarios() {
       {/* MODAL AGREGAR USUARIO */}
       {modalAbierto && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-slate-600 bg-[#25364B] p-6 shadow-2xl">
+          <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-600 bg-[#25364B] p-6 shadow-2xl">
 
             <div className="mb-5 flex items-center justify-between">
               <h2 className="text-xl font-bold">
@@ -553,6 +576,40 @@ export default function Usuarios() {
                   <option value="admin">Administrador</option>
                 </select>
               </div>
+
+              {/* Tienda: solo los vendedores pertenecen a una tienda */}
+              {formulario.rol === 'vendedor' && (
+                <div>
+                  <label className="mb-1 flex items-center gap-2 text-sm">
+                    <Store size={15} className="text-blue-400" />
+                    Asignar a una tienda
+                  </label>
+                  <select
+                    value={formulario.id_tienda}
+                    onChange={(e) =>
+                      setFormulario({
+                        ...formulario,
+                        id_tienda: e.target.value
+                      })
+                    }
+                    className="w-full rounded-lg border border-slate-500 bg-[#0F172A] p-3 text-white"
+                  >
+                    <option value="">
+                      {tiendas.length > 0
+                        ? 'Elegir tienda...'
+                        : 'Usar tienda por defecto'}
+                    </option>
+                    {tiendas.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.nombre}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-slate-400">
+                    El vendedor solo verá productos, ventas y gastos de su tienda.
+                  </p>
+                </div>
+              )}
 
               <p className="text-xs text-slate-300">
                 El nuevo usuario se registrará como activo.

@@ -17,8 +17,10 @@ import ListaProductos from './pages/inventario/ListaProductos';
 import EntradaStock from './pages/inventario/EntradaStock';
 import DashboardInv from './pages/inventario/DashboardInv';
 import VentasPro from './pages/VentasPro';
+import DevolucionPro from './pages/DevolucionPro';
 import Usuarios from './pages/Usuarios';
 import VentasVendedores from './pages/VentasVendedores';
+import Gastos from './pages/Gastos';
 
 import './App.css';
 
@@ -31,6 +33,17 @@ export default function App() {
   const [menuAbierto, setMenuAbierto] = useState(false);
 
   useEffect(() => {
+    // Lee la respuesta como texto: si el servidor devuelve HTML en vez de
+    // JSON (p. ej. abriendo la API directamente) no revienta la aplicación.
+    const leerJson = async (respuesta) => {
+      const texto = await respuesta.text();
+      try {
+        return JSON.parse(texto);
+      } catch {
+        throw new Error('El servidor no devolvió una respuesta válida.');
+      }
+    };
+
     const iniciarAplicacion = async () => {
       try {
         // Verificar si se necesita crear el primer administrador
@@ -43,9 +56,9 @@ export default function App() {
           throw new Error('No se pudo verificar la configuración.');
         }
 
-        const configuracion = await respuestaConfig.json();
+        const configuracion = await leerJson(respuestaConfig);
 
-        if (configuracion.requiere_configuracion) {
+        if (configuracion?.requiere_configuracion) {
           setRequiereConfiguracion(true);
           return;
         }
@@ -56,8 +69,10 @@ export default function App() {
         });
 
         if (respuestaSesion.ok) {
-          const datos = await respuestaSesion.json();
-          setUsuarioActual(datos.usuario);
+          const datos = await leerJson(respuestaSesion);
+          if (datos?.usuario) {
+            setUsuarioActual(datos.usuario);
+          }
         }
 
       } catch (error) {
@@ -130,7 +145,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <div className="app-shell text-slate-800">
+      <div className="app-shell text-slate-100">
         <Sidebar
           usuario={usuarioActual}
           abierto={menuAbierto}
@@ -175,6 +190,12 @@ export default function App() {
               element={<VentasPro />}
             />
 
+            {/* Devoluciones: admin y vendedor, sin restricciones */}
+            <Route
+              path="/devoluciones"
+              element={<DevolucionPro />}
+            />
+
             <Route
               path="/administracion/usuarios"
               element={soloAdmin(<Usuarios />)}
@@ -183,6 +204,11 @@ export default function App() {
             <Route
               path="/administracion/ventas"
               element={soloAdmin(<VentasVendedores />)}
+            />
+
+            <Route
+              path="/gastos"
+              element={<Gastos usuario={usuarioActual} />}
             />
 
             <Route

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';   {/*importamos react */}
-import { ArrowDownCircle, Plus, CheckCircle, Package } from 'lucide-react';   {/*importamos los iconos de lucide-react */}
+import { useSearchParams } from 'react-router-dom';
+import { ArrowDownCircle, Plus, CheckCircle, Package, Save, Phone, Building2 } from 'lucide-react';   {/*importamos los iconos de lucide-react */}
+import SelectorTienda from '../../components/SelectorTienda';
 
 
 /*ESTO NO REGISTRA NUEVOS PRODUCTOS SOLO AÑADE PRODUCTOS YA EXIXTENTES INDICANDO LA CANTIDAD Y EL PROVEEDOR*/
@@ -8,6 +10,8 @@ export default function EntradaStock() { //duda
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState('');
+  // Producto precargado desde la lista (doble clic en una fila).
+  const [searchParams] = useSearchParams();
 
   const [proveedor, setProveedor] = useState(""); // esto es una variable estaica para almacenar el proveedor inicializada como vacia
   /*esto es para cuando el frontend se muestre un espacio vacio y dentro de este se introducira dato y este sera reemplazado
@@ -20,12 +24,24 @@ export default function EntradaStock() { //duda
   const [costoUnitario, setCostoUnitario] = useState('');
   const [exito, setExito] = useState(false);
 
+  // Edición del proveedor del producto (se guarda en la tabla productos).
+  const [proveedorEdit, setProveedorEdit] = useState('');
+  const [telefonoEdit, setTelefonoEdit] = useState('');
+  const [guardandoProveedor, setGuardandoProveedor] = useState(false);
+  const [mensajeProveedor, setMensajeProveedor] = useState('');
+  const [errorProveedor, setErrorProveedor] = useState('');
+  // Tienda donde se registra la entrada (selector del administrador).
+  const [tiendaSeleccionada, setTiendaSeleccionada] = useState('');
+
   const cargarProductos = async () => {
     setCargando(true);
     setError('');
 
     try {
-      const respuesta = await fetch('/productos', {
+      const query = tiendaSeleccionada
+        ? `?id_tienda=${encodeURIComponent(tiendaSeleccionada)}`
+        : '';
+      const respuesta = await fetch(`/productos${query}`, {
         method: 'GET',
         credentials: 'include',
       });
@@ -46,6 +62,8 @@ export default function EntradaStock() { //duda
         stock: Number(p.stock ?? 0),
         costo: Number(p.precio_compra ?? 0),
         costoPromedio: Number(p.costo_promedio ?? 0),
+        proveedor: p.proveedor ?? '',
+        telefonoProveedor: p.telefono_proveedor ?? '',
       })));
 
     } catch (err) {
@@ -60,7 +78,72 @@ export default function EntradaStock() { //duda
 
   useEffect(() => {
     cargarProductos();
-  }, []);
+  }, [tiendaSeleccionada]);
+
+  // Producto que llega desde la lista (doble clic): se selecciona solo,
+  // con su precio de compra ya cargado en el campo Costo Unitario (editable).
+  useEffect(() => {
+    const idParam = searchParams.get('producto');
+    if (!idParam || !productos.length) return;
+    const p = productos.find(x => x.id === parseInt(idParam));
+    if (!p) return;
+    setProductoId(String(p.id));
+    setCostoUnitario(String(p.costo ?? 0));
+    setProveedor(p.proveedor || '');
+    setBusqueda(`${p.codOrigen} - ${p.codigo} - ${p.nombre}`);
+    setMostrarResultados(false);
+  }, [searchParams, productos]);
+
+  // Al cambiar de producto se cargan sus datos de proveedor para editarlos.
+  useEffect(() => {
+    setProveedorEdit(productoSeleccionado?.proveedor ?? '');
+    setTelefonoEdit(productoSeleccionado?.telefonoProveedor ?? '');
+    setMensajeProveedor('');
+    setErrorProveedor('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productoId]);
+
+  // Guarda el proveedor del producto en la tabla productos (backend PATCH).
+  const guardarProveedor = async () => {
+    if (!productoSeleccionado || guardandoProveedor) return;
+    setGuardandoProveedor(true);
+    setMensajeProveedor('');
+    setErrorProveedor('');
+    try {
+      const respuesta = await fetch(
+        `/productos/${productoSeleccionado.id}/proveedor`,
+        {
+          method: 'PATCH',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            proveedor: proveedorEdit.trim(),
+            telefono_proveedor: telefonoEdit.trim()
+          })
+        }
+      );
+      const resultado = await respuesta.json();
+      if (!respuesta.ok) {
+        throw new Error(resultado.error || 'No se pudo actualizar el proveedor');
+      }
+
+      // Se actualiza también la lista de productos en pantalla.
+      setProductos((anterior) => anterior.map((p) =>
+        p.id === productoSeleccionado.id
+          ? {
+              ...p,
+              proveedor: proveedorEdit.trim(),
+              telefonoProveedor: telefonoEdit.trim()
+            }
+          : p
+      ));
+      setMensajeProveedor('Proveedor actualizado en la tabla de productos');
+    } catch (err) {
+      setErrorProveedor(err.message);
+    } finally {
+      setGuardandoProveedor(false);
+    }
+  };
 
   const handleRegistrar = async (e) => {
     e.preventDefault();
@@ -99,7 +182,8 @@ export default function EntradaStock() { //duda
           },
           body: JSON.stringify({
             cantidad: cantidadNumero,
-            costo_unitario: costoNumero
+            costo_unitario: costoNumero,
+            ...(tiendaSeleccionada ? { id_tienda: Number(tiendaSeleccionada) } : {})
           })
         }
       );
@@ -141,17 +225,24 @@ export default function EntradaStock() { //duda
     );
 
   return (
-    <div className="p-6 bg-slate-900 min-h-screen"> 
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-100">AÑADIR PRODUCTOS AGOTADOS</h1> {/**este es el titulo de la pagina  */}
-        <p className="text-slate-200 text-sm"> actualiza productos agotados de inventario</p> {/*esto es el subtitulo de la pagina */}
+    <div className="p-6 bg-[#0F172A] min-h-screen text-slate-100"> 
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-100">AÑADIR PRODUCTOS AGOTADOS</h1> {/**este es el titulo de la pagina  */}
+          <p className="text-slate-400 text-sm"> actualiza productos agotados de inventario</p> {/*esto es el subtitulo de la pagina */}
+        </div>
+
+        <SelectorTienda
+          valor={tiendaSeleccionada}
+          onChange={setTiendaSeleccionada}
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
 
         {/* area del formulario*/}
-        <div className="lg:col-span-2 bg-slate-800 p-6 rounded-2xl border border-slate-200 shadow-sm">
+        <div className="lg:col-span-2 bg-[#1E293B] p-6 rounded-xl border border-slate-700 shadow-sm">
           <form onSubmit={handleRegistrar} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
@@ -162,7 +253,7 @@ export default function EntradaStock() { //duda
                   placeholder="Empresa o Proveedor"/*este se mostrara en el input*/
                   value={proveedor}  //validando de la base de datos
                   onChange={(e) => setProveedor(e.target.value)}
-                  className="w-full p-2.5 bg-slate-200 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full p-2.5 bg-[#0F172A] border border-slate-500 rounded-lg text-sm text-white outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
               <div>
@@ -172,7 +263,7 @@ export default function EntradaStock() { //duda
                   placeholder="Ej: F-90821"
                   value={numFactura}
                   onChange={(e) => setNumFactura(e.target.value)}
-                  className="w-full p-2.5 bg-slate-200 border border-slate-200 rounded-lg text-sm outline-none  focus:ring-2 focus:ring-blue-500"
+                  className="w-full p-2.5 bg-[#0F172A] border border-slate-500 rounded-lg text-sm text-white outline-none  focus:ring-2 focus:ring-blue-500"
                 />
               </div>
             </div>
@@ -193,12 +284,12 @@ export default function EntradaStock() { //duda
                     setMostrarResultados(true);
                   }}
                   onFocus={() => setMostrarResultados(true)}
-                  className="w-full p-2.5 bg-slate-200 border border-slate-200 rounded-lg text-sm text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full p-2.5 bg-[#0F172A] border border-slate-500 rounded-lg text-sm text-white outline-none focus:ring-2 focus:ring-blue-500"
                 />
 
                 {/* Resultados debajo del buscador */}
                 {mostrarResultados && busqueda.trim() !== '' && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-300 rounded-lg shadow-xl z-50 max-h-60 overflow-y-auto">
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-[#1E293B] border border-slate-600 rounded-lg shadow-xl z-50 max-h-60 overflow-y-auto">
 
                     {productosFiltrados.length > 0 ? (
                       productosFiltrados.map((p) => (
@@ -208,26 +299,27 @@ export default function EntradaStock() { //duda
                           onClick={() => {
                             setProductoId(String(p.id));
                             setCostoUnitario(String(p.costo));
+                            setProveedor(p.proveedor || '');
                             setBusqueda(`${p.codOrigen} - ${p.codigo} - ${p.nombre}`);
                             setMostrarResultados(false);
                           }}
-                          className="w-full text-left px-3 py-3 border-b border-slate-200 hover:bg-blue-100 transition-colors"
+                          className="w-full text-left px-3 py-3 border-b border-slate-700 hover:bg-slate-700/60 transition-colors"
                         >
-                          <p className="font-semibold text-sm text-slate-800">
+                          <p className="font-semibold text-sm text-slate-100">
                             {p.nombre}
                           </p>
 
-                          <p className="text-xs text-slate-500">
+                          <p className="text-xs text-slate-400">
                             Origen: {p.codOrigen} | Código: {p.codigo}
                           </p>
 
-                          <p className="text-xs text-blue-600">
+                          <p className="text-xs text-blue-400">
                             Stock actual: {p.stock}
                           </p>
                         </button>
                       ))
                     ) : (
-                      <p className="p-3 text-sm text-slate-500">
+                      <p className="p-3 text-sm text-slate-400">
                         No se encontraron productos.
                       </p>
                     )}
@@ -238,20 +330,69 @@ export default function EntradaStock() { //duda
 
               {/* Producto seleccionado */}
               {productoSeleccionado && (
-                <div className="mt-3 p-3 bg-blue-100 border border-blue-300 rounded-lg">
-                  <p className="text-xs text-blue-600 font-semibold">
+                <div className="mt-3 p-3 bg-blue-950/50 border border-blue-800 rounded-lg">
+                  <p className="text-xs text-blue-300 font-semibold">
                     Producto seleccionado
                   </p>
 
-                  <p className="text-sm font-bold text-slate-800">
+                  <p className="text-sm font-bold text-slate-100">
                     {productoSeleccionado.nombre}
                   </p>
 
-                  <p className="text-xs text-slate-600">
+                  <p className="text-xs text-slate-300">
                     Código: {productoSeleccionado.codigo}
                     {' | '}
                     Stock: {productoSeleccionado.stock}
                   </p>
+                  <p className="text-xs text-slate-300">
+                    Precio de compra:{' '}
+                    <span className="font-bold text-emerald-300">
+                      ${(productoSeleccionado.costo ?? 0).toFixed(2)}
+                    </span>
+                    {' '}· Se carga en "Costo Unitario" y puedes modificarlo
+                  </p>
+
+                  {/* Proveedor del producto (editable, se guarda en productos) */}
+                  <div className="mt-3 pt-3 border-t border-blue-900 space-y-2">
+                    <p className="text-xs font-bold text-blue-300 uppercase flex items-center gap-1">
+                      <Building2 size={13} /> Proveedor del producto
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        placeholder="Nombre del proveedor"
+                        value={proveedorEdit}
+                        onChange={(e) => setProveedorEdit(e.target.value)}
+                        className="w-full p-2 bg-[#0F172A] border border-slate-500 rounded-lg text-sm text-white outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Teléfono del proveedor"
+                        value={telefonoEdit}
+                        onChange={(e) => setTelefonoEdit(e.target.value)}
+                        className="w-full p-2 bg-[#0F172A] border border-slate-500 rounded-lg text-sm text-white outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={guardarProveedor}
+                      disabled={guardandoProveedor}
+                      className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg disabled:opacity-60"
+                    >
+                      <Save size={14} />
+                      {guardandoProveedor ? 'Guardando...' : 'Guardar proveedor'}
+                    </button>
+                    {mensajeProveedor && (
+                      <p className="text-xs text-emerald-400 font-semibold">
+                        {mensajeProveedor}
+                      </p>
+                    )}
+                    {errorProveedor && (
+                      <p className="text-xs text-rose-400 font-semibold">
+                        {errorProveedor}
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -267,7 +408,7 @@ export default function EntradaStock() { //duda
                   placeholder="0"
                   value={cantidad}
                   onChange={(e) => setCantidad(e.target.value)}
-                  className="w-full p-2.5 bg-slate-200 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full p-2.5 bg-[#0F172A] border border-slate-500 rounded-lg text-sm text-white outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
               <div>
@@ -280,7 +421,7 @@ export default function EntradaStock() { //duda
                   placeholder="0.00"
                   value={costoUnitario}
                   onChange={(e) => setCostoUnitario(e.target.value)}
-                  className="w-full p-2.5 bg-slate-200 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full p-2.5 bg-[#0F172A] border border-slate-500 rounded-lg text-sm text-white outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
             </div>
@@ -299,14 +440,14 @@ export default function EntradaStock() { //duda
 
           {/* Mensaje de error */}
           {error && (
-            <div className="mt-4 p-3 bg-red-100 border border-red-200 text-red-700 text-sm rounded-lg">
+            <div className="mt-4 p-3 bg-rose-950 border border-rose-800 text-rose-200 text-sm rounded-lg">
               {error}
             </div>
           )}
 
           {/* Mensaje de éxito */}
           {exito && (
-            <div className="mt-4 p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm rounded-lg flex items-center gap-2">
+            <div className="mt-4 p-3 bg-emerald-950 border border-emerald-800 text-emerald-200 text-sm rounded-lg flex items-center gap-2">
               <CheckCircle size={18} />
               Ingreso registrado correctamente. Stock actualizado.
             </div>
@@ -316,38 +457,52 @@ export default function EntradaStock() { //duda
         </div>
 
         {/* Resumen Lateral */}
-        <div className="bg-slate-800 p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+        <div className="bg-[#1E293B] p-6 rounded-xl border border-slate-700 shadow-sm flex flex-col justify-between">
           <div>
             <h3 className="font-bold text-slate-100 text-base mb-4 flex items-center gap-2">
-              <Package size={20} className="text-blue-600" /> Resumen del Ingreso
+              <Package size={20} className="text-blue-400" /> Resumen del Ingreso
             </h3>
             {productoSeleccionado ? (
               <div className="space-y-3 text-sm">
-                <div className="p-3 bg-slate-200 rounded-lg">
-                  <p className="text-xs text-slate-600">Producto:</p>
-                  <p className="font-bold text-slate-800">{productoSeleccionado.nombre}</p>
+                <div className="p-3 bg-[#0F172A] border border-slate-700 rounded-lg">
+                  <p className="text-xs text-slate-400">Producto:</p>
+                  <p className="font-bold text-slate-100">{productoSeleccionado.nombre}</p>
                 </div>
-                <div className="flex justify-between border-b py-2">
-                  <span className="text-slate-200">Stock Actual:</span>
-                  <span className="font-bold text-red-600">
+                <div className="p-3 bg-[#0F172A] border border-slate-700 rounded-lg">
+                  <p className="text-xs text-slate-400 flex items-center gap-1">
+                    <Building2 size={12} /> Proveedor:
+                  </p>
+                  <p className="font-bold text-slate-100">
+                    {productoSeleccionado.proveedor || 'Sin proveedor registrado'}
+                  </p>
+                  {productoSeleccionado.telefonoProveedor && (
+                    <p className="text-xs text-slate-400 flex items-center gap-1 mt-1">
+                      <Phone size={12} />
+                      {productoSeleccionado.telefonoProveedor}
+                    </p>
+                  )}
+                </div>
+                <div className="flex justify-between border-b border-slate-700 py-2">
+                  <span className="text-slate-300">Stock Actual:</span>
+                  <span className="font-bold text-rose-400">
                     {productoSeleccionado.stock} unidades</span>
                 </div>
-                <div className="flex justify-between border-b py-2">
-                  <span className="text-slate-200">Costo promedio actual:</span>
+                <div className="flex justify-between border-b border-slate-700 py-2">
+                  <span className="text-slate-300">Costo promedio actual:</span>
                   <span className="font-bold text-emerald-400">
                     Bs {Number(productoSeleccionado.costoPromedio ?? 0).toFixed(2)}
                   </span>
                 </div>
 
-                <div className="flex justify-between border-b py-2">
-                  <span className="text-slate-200">Nuevo Stock:</span>
-                  <span className="font-bold text-emerald-600">
+                <div className="flex justify-between border-b border-slate-700 py-2">
+                  <span className="text-slate-300">Nuevo Stock:</span>
+                  <span className="font-bold text-emerald-400">
                     {productoSeleccionado.stock + (parseInt(cantidad) || 0)} unidades
                   </span>
                 </div>
-                <div className="flex justify-between border-b py-2">
-                  <span className="text-slate-200 ">Inversión Total:</span>
-                  <span className="font-bold text-blue-600">
+                <div className="flex justify-between border-b border-slate-700 py-2">
+                  <span className="text-slate-300">Inversión Total:</span>
+                  <span className="font-bold text-blue-400">
                     ${((parseInt(cantidad) || 0) * (parseFloat(costoUnitario) || 0)).toFixed(2)}
                   </span>
                 </div>

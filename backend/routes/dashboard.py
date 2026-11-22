@@ -1,6 +1,6 @@
 
-from flask import Blueprint, jsonify
-from database.database import get_db
+from flask import Blueprint, jsonify, request, session
+from database.database import get_db, tienda_actual, tienda_param
 from auth import roles_permitidos
 
 dashboard_bp = Blueprint("dashboard", __name__)
@@ -14,20 +14,93 @@ def obtener_dashboard():
     db = get_db()
 
     try:
+        # El administrador puede elegir la tienda cuyo panel quiere ver.
+        id_tienda = tienda_param(
+            db,
+            session.get("rol"),
+            session.get("id_tienda"),
+            request.args.get("id_tienda", type=int)
+        )
+
         # =========================================
-        # 1. VENTAS DEL MES
+        # 1. VENTAS, COSTOS, DEVOLUCIONES Y GASTOS DEL MES
+        # (una sola consulta: cada ida y vuelta a Turso cuesta ~200 ms.
+        #  Las devoluciones se DESCUENTAN de lo que sumo la venta.)
         # =========================================
         resumen = db.execute("""
             SELECT
-                COUNT(*) AS ordenes,
-                COALESCE(SUM(total), 0) AS ventas_mes
-            FROM ventas
-            WHERE strftime('%Y-%m', fecha) =
-                  strftime('%Y-%m', 'now', 'localtime')
-        """).fetchone()
+                (SELECT COUNT(*)
+                 FROM ventas
+                 WHERE id_tienda = ?
+                   AND tipo = 'venta'
+                   AND estado = 'completada'
+                   AND strftime('%Y-%m', fecha) =
+                       strftime('%Y-%m', 'now', 'localtime')
+                ) AS ordenes,
+                (SELECT COALESCE(SUM(total), 0)
+                 FROM ventas
+                 WHERE id_tienda = ?
+                   AND tipo = 'venta'
+                   AND estado = 'completada'
+                   AND strftime('%Y-%m', fecha) =
+                       strftime('%Y-%m', 'now', 'localtime')
+                ) AS ventas_brutas,
+                (SELECT COALESCE(SUM(total), 0)
+                 FROM ventas
+                 WHERE id_tienda = ?
+                   AND tipo = 'devolucion'
+                   AND estado = 'completada'
+                   AND strftime('%Y-%m', fecha) =
+                       strftime('%Y-%m', 'now', 'localtime')
+                   AND EXISTS (
+                       SELECT 1 FROM ventas o
+                       WHERE o.id = ventas.id_venta_origen
+                         AND o.estado = 'completada'
+                   )
+                ) AS devoluciones,
+                (SELECT COALESCE(SUM(d.cantidad * d.costo_unitario), 0)
+                 FROM detalle_ventas d
+                 INNER JOIN ventas v
+                     ON v.id = d.id_venta
+                 WHERE v.id_tienda = ?
+                   AND v.tipo = 'venta'
+                   AND v.estado = 'completada'
+                   AND strftime('%Y-%m', v.fecha) =
+                       strftime('%Y-%m', 'now', 'localtime')
+                ) AS costo_ventas,
+                (SELECT COALESCE(SUM(d.cantidad * d.costo_unitario), 0)
+                 FROM detalle_ventas d
+                 INNER JOIN ventas v
+                     ON v.id = d.id_venta
+                 WHERE v.id_tienda = ?
+                   AND v.tipo = 'devolucion'
+                   AND v.estado = 'completada'
+                   AND strftime('%Y-%m', v.fecha) =
+                       strftime('%Y-%m', 'now', 'localtime')
+                   AND EXISTS (
+                       SELECT 1 FROM ventas o
+                       WHERE o.id = v.id_venta_origen
+                         AND o.estado = 'completada'
+                   )
+                ) AS costo_devoluciones,
+                (SELECT COALESCE(SUM(monto), 0)
+                 FROM gastos
+                 WHERE id_tienda = ?
+                   AND estado = 'vigente'
+                   AND strftime('%Y-%m', fecha) =
+                       strftime('%Y-%m', 'now', 'localtime')
+                ) AS gastos_mes
+        """, (id_tienda,) * 6).fetchone()
 
-        ventas_mes = float(resumen["ventas_mes"] or 0)
         ordenes = int(resumen["ordenes"] or 0)
+        ventas_brutas = float(resumen["ventas_brutas"] or 0)
+        devoluciones_mes = float(resumen["devoluciones"] or 0)
+        costo_total = float(resumen["costo_ventas"] or 0) \
+            - float(resumen["costo_devoluciones"] or 0)
+        gastos_mes = float(resumen["gastos_mes"] or 0)
+
+        # Ventas netas: lo que sumo la venta menos lo que se devolvio.
+        ventas_mes = ventas_brutas - devoluciones_mes
 
         ticket_promedio = (
             ventas_mes / ordenes if ordenes > 0 else 0
@@ -35,32 +108,9 @@ def obtener_dashboard():
 
         # =========================================
         # 2. GANANCIA ESTIMADA DEL MES
+        # (ventas netas - costo neto - gastos del mes)
         # =========================================
-        costos = db.execute("""
-            SELECT
-                COALESCE(
-                    SUM(
-                        d.cantidad *
-                        COALESCE(
-                            p.costo_promedio,
-                            p.precio_compra,
-                            0
-                        )
-                    ),
-                    0
-                ) AS costo_total
-            FROM detalle_ventas d
-            INNER JOIN ventas v
-                ON v.id = d.id_venta
-            INNER JOIN productos p
-                ON p.id = d.id_producto
-            WHERE strftime('%Y-%m', v.fecha) =
-                  strftime('%Y-%m', 'now', 'localtime')
-        """).fetchone()
-
-        costo_total = float(costos["costo_total"] or 0)
-
-        ganancia_estimada = ventas_mes - costo_total
+        ganancia_estimada = ventas_mes - costo_total - gastos_mes
 
         margen_promedio = (
             ganancia_estimada / ventas_mes * 100
@@ -68,35 +118,83 @@ def obtener_dashboard():
         )
 
         # =========================================
-        # 3. PRODUCTOS CRITICOS
+        # 3. INVENTARIO POR CATEGORIA + CRITICOS
+        # (una sola consulta: ambas recorren productos x inventario)
         # =========================================
-        criticos = db.execute("""
-            SELECT COUNT(*) AS cantidad
-            FROM productos
-            WHERE COALESCE(stock, 0) <= ?
-        """, (STOCK_CRITICO,)).fetchone()
+        filas_inventario = db.execute("""
+            SELECT
+                COALESCE(NULLIF(TRIM(p.categoria), ''), 'Sin categoría')
+                    AS categoria,
+                COALESCE(
+                    SUM(
+                        COALESCE(i.stock, 0) *
+                        COALESCE(i.costo_promedio, 0)
+                    ),
+                    0
+                ) AS valor,
+                SUM(
+                    CASE WHEN COALESCE(i.stock, 0) <= ? THEN 1 ELSE 0 END
+                ) AS criticos
+            FROM productos p
+            LEFT JOIN inventario i
+                ON i.id_producto = p.id AND i.id_tienda = ?
+            WHERE p.activo = 1
+            GROUP BY COALESCE(
+                NULLIF(TRIM(p.categoria), ''),
+                'Sin categoría'
+            )
+            ORDER BY valor DESC
+        """, (STOCK_CRITICO, id_tienda)).fetchall()
 
-        productos_criticos = int(criticos["cantidad"] or 0)
+        productos_criticos = sum(int(fila["criticos"] or 0)
+                                 for fila in filas_inventario)
+
+        valor_inventario = [
+            {
+                "categoria": fila["categoria"],
+                "valor": round(float(fila["valor"]), 2)
+            }
+            for fila in filas_inventario
+        ]
 
         # =========================================
-        # 4. PRODUCTOS MAS VENDIDOS DEL MES
+        # 4. PRODUCTOS MAS VENDIDOS DEL MES (neto de devoluciones)
         # =========================================
         filas_vendidos = db.execute("""
             SELECT
                 p.id,
                 p.nombre,
-                SUM(d.cantidad) AS cantidad_vendida
+                SUM(
+                    CASE WHEN v.tipo = 'venta'
+                         THEN d.cantidad
+                         ELSE -d.cantidad
+                    END
+                ) AS cantidad_vendida
             FROM detalle_ventas d
             INNER JOIN productos p
                 ON p.id = d.id_producto
             INNER JOIN ventas v
                 ON v.id = d.id_venta
-            WHERE strftime('%Y-%m', v.fecha) =
+            WHERE v.id_tienda = ?
+              AND v.estado = 'completada'
+              AND (
+                    v.tipo = 'venta'
+                    OR (
+                        v.tipo = 'devolucion'
+                        AND EXISTS (
+                            SELECT 1 FROM ventas o
+                            WHERE o.id = v.id_venta_origen
+                              AND o.estado = 'completada'
+                        )
+                    )
+              )
+              AND strftime('%Y-%m', v.fecha) =
                   strftime('%Y-%m', 'now', 'localtime')
             GROUP BY p.id, p.nombre
+            HAVING cantidad_vendida > 0
             ORDER BY cantidad_vendida DESC, p.nombre ASC
             LIMIT 5
-        """).fetchall()
+        """, (id_tienda,)).fetchall()
 
         productos_mas_vendidos = [
             {
@@ -107,42 +205,11 @@ def obtener_dashboard():
             for fila in filas_vendidos
         ]
 
-        # =========================================
-        # 5. VALOR DEL INVENTARIO POR TIPO
-        # =========================================
-        filas_inventario = db.execute("""
-            SELECT
-                COALESCE(NULLIF(TRIM(tipo), ''), 'Sin categoría')
-                    AS categoria,
-                COALESCE(
-                    SUM(
-                        COALESCE(stock, 0) *
-                        COALESCE(
-                            costo_promedio,
-                            precio_compra,
-                            0
-                        )
-                    ),
-                    0
-                ) AS valor
-            FROM productos
-            GROUP BY COALESCE(
-                NULLIF(TRIM(tipo), ''),
-                'Sin categoría'
-            )
-            ORDER BY valor DESC
-        """).fetchall()
-
-        valor_inventario = [
-            {
-                "categoria": fila["categoria"],
-                "valor": round(float(fila["valor"]), 2)
-            }
-            for fila in filas_inventario
-        ]
-
         return jsonify({
             "ventas_mes": round(ventas_mes, 2),
+            "ventas_brutas": round(ventas_brutas, 2),
+            "devoluciones_mes": round(devoluciones_mes, 2),
+            "gastos_mes": round(gastos_mes, 2),
             "ganancia_estimada": round(ganancia_estimada, 2),
             "ordenes_realizadas": ordenes,
             "ticket_promedio": round(ticket_promedio, 2),

@@ -1,3 +1,4 @@
-.app-shell { min-height: 100vh; background: #f8fafc; }
+.app-shell { min-height: 100vh; background: #0F172A; }
 .app-content { min-width: 0; transition: padding .2s ease; }
-@media (min-width: 1024px) { .app-content { padding-left: 16rem; } }
+/* El sidebar mide w-68 (17rem): el contenido debe empezar justo después. */
+@media (min-width: 1024px) { .app-content { padding-left: 17rem; } }

@@ -96,7 +96,7 @@ export default function ConfiguracionInicial({ onConfigurado }) {
 
           <p className="mt-5 text-base leading-7 text-blue-100">
             Crea tu cuenta de administrador para comenzar
-            a registrar productos, proveedores, usuarios y ventas.
+            a registrar productos con sus proveedores, usuarios y ventas.
           </p>
         </div>
 

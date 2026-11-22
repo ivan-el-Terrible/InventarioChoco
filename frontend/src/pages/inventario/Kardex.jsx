@@ -1,20 +1,32 @@
 import React, { useEffect, useState } from 'react';
 import {
   X, ArrowUpRight, ArrowDownLeft, FileText,
-  Search, ClipboardList, Package, RotateCcw
+  Search, ClipboardList, Package, RotateCcw, Printer, FileSpreadsheet
 } from 'lucide-react';
+import SelectorTienda from '../../components/SelectorTienda';
+import { imprimirDocumento, escapar } from '../../utils/impresion';
+import { generarExcel } from '../../utils/excel';
 
 const API = '';
 
 function adaptarMovimiento(m) {
   const tipoOriginal = String(m.tipo_movimiento ?? '').toLowerCase();
-  const tipo = tipoOriginal.includes('entrada') || tipoOriginal.includes('compra')
+  // Tipos de la base en la nube: compra, venta, devolucion, ajuste_entrada,
+  // ajuste_salida, traspaso_entrada, traspaso_salida, carga_inicial.
+  const esEntrada = tipoOriginal.includes('entrada')
+    || tipoOriginal.includes('compra')
+    || tipoOriginal.includes('carga_inicial')
+    || tipoOriginal.includes('devolucion');
+  const esSalida = tipoOriginal.includes('salida')
+    || tipoOriginal.includes('venta');
+  const tipo = esEntrada
     ? 'Entrada'
-    : tipoOriginal.includes('salida') || tipoOriginal.includes('venta')
+    : esSalida
       ? 'Salida'
       : String(m.tipo_movimiento ?? 'Otro');
   return {
     id: m.id,
+    idProducto: m.id_producto,
     fecha: String(m.fecha ?? ''),
     codOrigen: m.codOrigi ?? '',
     codigo: m.codigo ?? '',
@@ -71,8 +83,8 @@ function EtiquetaTipo({ tipo }) {
   const salida = tipo === 'Salida';
   return (
     <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold ${
-      entrada ? 'bg-emerald-100 text-emerald-700' :
-      salida ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-700'
+      entrada ? 'bg-emerald-900 text-emerald-200' :
+      salida ? 'bg-amber-900 text-amber-200' : 'bg-slate-600 text-slate-200'
     }`}>
       {entrada ? <ArrowDownLeft size={14} /> : salida ? <ArrowUpRight size={14} /> : null}
       {tipo}
@@ -85,7 +97,29 @@ function KardexGeneral() {
   const [tipoFiltro, setTipoFiltro] = useState('Todos');
   const [fechaInicio, setFechaInicio] = useState('');
   const [fechaFin, setFechaFin] = useState('');
-  const { movimientos, cargando, error } = useMovimientos(`${API}/kardex`);
+  const [tiendaSeleccionada, setTiendaSeleccionada] = useState('');
+  const [tiendas, setTiendas] = useState([]);
+  const [exportando, setExportando] = useState(false);
+  const urlKardex = tiendaSeleccionada
+    ? `${API}/kardex?id_tienda=${encodeURIComponent(tiendaSeleccionada)}`
+    : `${API}/kardex`;
+  const { movimientos, cargando, error } = useMovimientos(urlKardex);
+
+  // Nombres de tiendas para mostrar en la impresión (solo admin).
+  useEffect(() => {
+    let activo = true;
+    (async () => {
+      try {
+        const respuesta = await fetch('/tiendas', { credentials: 'include' });
+        if (!respuesta.ok) return;
+        const datos = await respuesta.json();
+        if (activo && Array.isArray(datos)) setTiendas(datos);
+      } catch {
+        /* sin tiendas: se usa la etiqueta por defecto */
+      }
+    })();
+    return () => { activo = false; };
+  }, []);
 
   const movimientosFiltrados = movimientos.filter(m => {
     const texto = busqueda.trim().toLowerCase();
@@ -106,120 +140,239 @@ function KardexGeneral() {
     setBusqueda(''); setTipoFiltro('Todos'); setFechaInicio(''); setFechaFin('');
   };
 
+  // Nombre de la tienda elegida (para impresion y Excel).
+  const nombreTiendaActual = () => tiendaSeleccionada
+    ? (tiendas.find((t) => String(t.id) === String(tiendaSeleccionada))?.nombre || `Tienda #${tiendaSeleccionada}`)
+    : (tiendas[0]?.nombre || '—');
+
+  // Imprime el Kardex filtrado (solo admin: la ruta es de administrador).
+  const imprimirKardex = () => {
+    const filtros = [
+      `Tienda: ${nombreTiendaActual()}`,
+      busqueda.trim() ? `Búsqueda: "${busqueda.trim()}"` : null,
+      tipoFiltro !== 'Todos' ? `Tipo: ${tipoFiltro}` : null,
+      fechaInicio || fechaFin
+        ? `Período: ${fechaInicio || '...'} a ${fechaFin || '...'}`
+        : null
+    ].filter(Boolean).join(' · ');
+
+    const filas = movimientosFiltrados.map((m) => `
+      <tr>
+        <td>${escapar(m.fecha)}</td>
+        <td>${escapar(m.codOrigen || '—')}</td>
+        <td>${escapar(m.codigo || '—')}</td>
+        <td>${escapar(m.producto)}</td>
+        <td class="ctr">${escapar(m.tipo)}</td>
+        <td>${escapar(m.detalle)}</td>
+        <td class="num">${m.tipo === 'Entrada' ? '+' : m.tipo === 'Salida' ? '-' : ''}${m.cantidad}</td>
+        <td class="num">${m.precioCompra == null ? '—' : `Bs ${m.precioCompra.toFixed(2)}`}</td>
+        <td class="num">${m.saldoAnterior}</td>
+        <td class="num">${m.saldoNuevo}</td>
+      </tr>`).join('');
+
+    imprimirDocumento({
+      titulo: 'Kardex general',
+      subtitulo: filtros,
+      encabezado: `Fecha de impresión: ${new Date().toLocaleString('es-BO')} · ${movimientosFiltrados.length} movimiento(s) · Entradas: ${entradas} · Salidas: ${salidas}`,
+      tabla: `
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Cod. Origen</th>
+              <th>Código</th>
+              <th>Producto</th>
+              <th class="ctr">Movimiento</th>
+              <th>Documento</th>
+              <th class="num">Cantidad</th>
+              <th class="num">P. Compra</th>
+              <th class="num">S. Anterior</th>
+              <th class="num">S. Nuevo</th>
+            </tr>
+          </thead>
+          <tbody>${filas}</tbody>
+        </table>`,
+      pie: 'InventarioChoco · Método de valoración: Costo Promedio Ponderado.'
+    });
+  };
+
+  // Guarda en Excel el Kardex filtrado (mismos filtros que la pantalla).
+  const exportarExcel = async () => {
+    if (exportando) return;
+    setExportando(true);
+    try {
+      const filas = movimientosFiltrados.map((m) => ({
+        'ID PRODUCTO': m.idProducto ?? '',
+        'Fecha': m.fecha,
+        'Cod. Origen': m.codOrigen || '',
+        'Código': m.codigo || '',
+        'Producto': m.producto,
+        'Movimiento': m.tipo,
+        'Detalle': m.detalle,
+        'Cantidad': m.cantidad,
+        'P. Compra ($)': m.precioCompra == null ? '' : Number(m.precioCompra.toFixed(2)),
+        'Saldo anterior': m.saldoAnterior,
+        'Saldo nuevo': m.saldoNuevo
+      }));
+
+      await generarExcel(
+        `kardex_${nombreTiendaActual().replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+        [{ nombre: 'Kardex', filas }]
+      );
+    } catch (err) {
+      console.error('Error al exportar el Kardex:', err);
+    } finally {
+      setExportando(false);
+    }
+  };
+
   return (
-    <div className="p-4 md:p-8 space-y-6 bg-slate-900 min-h-screen">
-      <div className="flex items-center gap-3">
-        <ClipboardList className="text-yellow-500" size={30} />
-        <div>
-          <h1 className="text-2xl font-bold text-slate-200">Kardex General</h1>
-          <p className="text-sm text-slate-300 mt-1">Historial de compras, ventas y movimientos de todos los productos.</p>
+    <div className="p-6 space-y-6 bg-[#0F172A] min-h-screen text-slate-100">
+      {/* Encabezado fijo: titulo, tienda, imprimir y guardar en Excel */}
+      <div className="sticky top-0 z-30 -mx-6 flex flex-wrap items-center justify-between gap-3 border-b border-slate-700/60 bg-[#0F172A] px-6 py-4">
+        <div className="flex items-center gap-3">
+          <ClipboardList className="text-yellow-500" size={30} />
+          <div>
+            <h1 className="text-2xl font-bold text-slate-100">Kardex General</h1>
+            <p className="text-sm text-slate-400 mt-1">Historial de compras, ventas y movimientos de todos los productos.</p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <SelectorTienda
+            valor={tiendaSeleccionada}
+            onChange={setTiendaSeleccionada}
+          />
+          <button
+            type="button"
+            onClick={imprimirKardex}
+            disabled={movimientosFiltrados.length === 0}
+            title="Imprimir el Kardex filtrado"
+            className="flex items-center gap-2 bg-slate-600 hover:bg-slate-500 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-md disabled:opacity-50"
+          >
+            <Printer size={17} /> Imprimir Kardex
+          </button>
+          <button
+            type="button"
+            onClick={exportarExcel}
+            disabled={exportando || movimientosFiltrados.length === 0}
+            title="Guardar en Excel el Kardex filtrado"
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-md disabled:opacity-50"
+          >
+            <FileSpreadsheet size={17} /> {exportando ? 'Generando...' : 'Excel'}
+          </button>
         </div>
       </div>
 
-      {error && <div role="alert" className="rounded-xl border border-white bg-red-50 p-3 text-sm text-red-100">{error}</div>}
+      {error && (
+        <div role="alert" className="rounded-lg border border-rose-800 bg-rose-950 p-3 text-sm text-rose-200">
+          {error}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-slate-300 rounded-xl shadow-sm border p-5">
-          <div className="flex items-center gap-2 text-emerald-600"><ArrowDownLeft size={20} /><span className="font-semibold">Entradas</span></div>
+        <div className="rounded-xl border border-slate-700 bg-[#1E293B] p-5">
+          <div className="flex items-center gap-2 text-emerald-400"><ArrowDownLeft size={20} /><span className="font-semibold">Entradas</span></div>
           <p className="text-3xl font-bold mt-3">{entradas}</p>
-          <p className="text-xs text-slate-900">Unidades ingresadas</p>
+          <p className="text-xs text-slate-400">Unidades ingresadas</p>
         </div>
-        <div className="bg-slate-300 rounded-xl shadow-sm border p-5">
-          <div className="flex items-center gap-2 text-red-600"><ArrowUpRight size={20} /><span className="font-semibold">Salidas</span></div>
+        <div className="rounded-xl border border-slate-700 bg-[#1E293B] p-5">
+          <div className="flex items-center gap-2 text-rose-400"><ArrowUpRight size={20} /><span className="font-semibold">Salidas</span></div>
           <p className="text-3xl font-bold mt-3">{salidas}</p>
-          <p className="text-xs text-slate-900">Unidades retiradas</p>
+          <p className="text-xs text-slate-400">Unidades retiradas</p>
         </div>
-        <div className="bg-slate-300 rounded-xl shadow-sm border p-5">
-          <div className="flex items-center gap-2 text-blue-600"><Package size={20} /><span className="font-semibold">Movimientos</span></div>
+        <div className="rounded-xl border border-slate-700 bg-[#1E293B] p-5">
+          <div className="flex items-center gap-2 text-blue-400"><Package size={20} /><span className="font-semibold">Movimientos</span></div>
           <p className="text-3xl font-bold mt-3">{movimientosFiltrados.length}</p>
-          <p className="text-xs text-slate-900">Registros encontrados</p>
+          <p className="text-xs text-slate-400">Registros encontrados</p>
         </div>
       </div>
 
-      <div className="bg-slate-300 rounded-xl border shadow-sm p-5">
-        <h2 className="font-bold text-slate-900 mb-4">Filtros de búsqueda</h2>
+      <div className="rounded-xl border border-slate-700 bg-[#1E293B] p-5">
+        <h2 className="font-bold text-slate-100 mb-4">Filtros de búsqueda</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
           <div>
-            <label className="text-xs text-slate-800">Buscar producto</label>
+            <label className="text-xs text-slate-300">Buscar producto</label>
             <div className="relative mt-1">
               <Search size={17} className="absolute left-3 top-3 text-slate-400" />
               <input type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)}
                 placeholder="Nombre, código o código original"
-                className="w-full border rounded-lg py-2.5 pl-10 pr-3 text-sm" />
+                className="w-full rounded-lg border border-slate-500 bg-[#0F172A] py-2.5 pl-10 pr-3 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>
           <div>
-            <label className="text-xs text-slate-800">Tipo de movimiento</label>
+            <label className="text-xs text-slate-300">Tipo de movimiento</label>
             <select value={tipoFiltro} onChange={e => setTipoFiltro(e.target.value)}
-              className="w-full mt-1 border rounded-lg p-2.5 text-sm bg-white">
+              className="w-full mt-1 rounded-lg border border-slate-500 bg-[#0F172A] p-2.5 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500">
               <option value="Todos">Todos</option>
               <option value="Entrada">Entradas / Compras</option>
               <option value="Salida">Salidas / Ventas</option>
             </select>
           </div>
           <div>
-            <label className="text-xs text-slate-800">Fecha desde</label>
+            <label className="text-xs text-slate-300">Fecha desde</label>
             <input type="date" value={fechaInicio} onChange={e => setFechaInicio(e.target.value)}
-              className="w-full mt-1 border rounded-lg p-2.5 text-sm" />
+              className="w-full mt-1 rounded-lg border border-slate-500 bg-[#0F172A] p-2.5 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
-            <label className="text-xs text-slate-800">Fecha hasta</label>
+            <label className="text-xs text-slate-300">Fecha hasta</label>
             <input type="date" value={fechaFin} onChange={e => setFechaFin(e.target.value)}
-              className="w-full mt-1 border rounded-lg p-2.5 text-sm" />
+              className="w-full mt-1 rounded-lg border border-slate-500 bg-[#0F172A] p-2.5 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
         </div>
         <button onClick={limpiarFiltros}
-          className="mt-4 flex items-center gap-2 text-sm text-orange-600 hover:text-orange-700 font-semibold">
+          className="mt-4 flex items-center gap-2 text-sm text-amber-400 hover:text-amber-300 font-semibold">
           <RotateCcw size={15} /> Limpiar filtros
         </button>
       </div>
 
-      <div className="bg-slate-300 rounded-xl border shadow-sm overflow-hidden">
-        <div className="p-5 border-b">
-          <h2 className="font-bold text-slate-800">Historial de movimientos</h2>
-          <p className="text-xs text-slate-500 mt-1">Entradas y salidas de todos los productos</p>
+      <div className="rounded-xl border border-slate-700 bg-[#1E293B] overflow-hidden">
+        <div className="p-5 border-b border-slate-700">
+          <h2 className="font-bold text-slate-100">Historial de movimientos</h2>
+          <p className="text-xs text-slate-400 mt-1">Entradas y salidas de todos los productos</p>
         </div>
-        <div className="overflow-x-auto">
+        {/* Solo las filas se desplazan: el encabezado queda fijo */}
+        <div className="overflow-auto max-h-[62vh]">
           <table className="w-full text-sm text-left">
-            <thead className="bg-slate-100 text-slate-600">
+            <thead className="text-slate-200">
               <tr>
-                <th className="p-3">Fecha</th>
-                <th className="p-3">Cod_Origen</th>
-                <th className="p-3">Código</th>
-                <th className="p-3">Producto</th>
-                <th className="p-3">Movimiento</th>
-                <th className="p-3">Documento</th>
-                <th className="p-3 text-right">Cantidad</th>
-                <th className="p-3 text-right">P. Compra</th>
-                <th className="p-3 text-right">S. anterior</th>
-                <th className="p-3 text-right">S. nuevo</th>
+                <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] p-4">Fecha</th>
+                <th className="sticky top-0 z-10 bg-[#334155] p-4">Cod_Origen</th>
+                <th className="sticky top-0 z-10 bg-[#334155] p-4">Código</th>
+                <th className="sticky top-0 z-10 bg-[#334155] p-4">Producto</th>
+                <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] p-4">Movimiento</th>
+                <th className="sticky top-0 z-10 bg-[#334155] p-4">Documento</th>
+                <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] p-4 text-right">Cantidad</th>
+                <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] p-4 text-right">P. Compra</th>
+                <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] p-4 text-right">S. anterior</th>
+                <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] p-4 text-right">S. nuevo</th>
               </tr>
             </thead>
-            <tbody className="divide-y">
+            <tbody>
               {movimientosFiltrados.map(m => (
-                <tr key={m.id} className="hover:bg-slate-50">
-                  <td className="p-3 whitespace-nowrap text-slate-500">{m.fecha}</td>
-                  <td className="p-3 font-mono">{m.codOrigen || '—'}</td>
-                  <td className="p-3 font-mono">{m.codigo}</td>
-                  <td className="p-3 font-semibold">{m.producto}</td>
-                  <td className="p-3"><EtiquetaTipo tipo={m.tipo} /></td>
-                  <td className="p-3">{m.detalle}</td>
-                  <td className={`p-3 text-right font-bold ${m.tipo === 'Entrada' ? 'text-emerald-600' : 'text-orange-600'}`}>
+                <tr key={m.id} className="border-t border-slate-700 hover:bg-slate-700/30">
+                  <td className="p-4 whitespace-nowrap text-slate-400">{m.fecha}</td>
+                  <td className="p-4 font-mono text-slate-300">{m.codOrigen || '—'}</td>
+                  <td className="p-4 font-mono text-slate-300">{m.codigo}</td>
+                  <td className="p-4 font-semibold">{m.producto}</td>
+                  <td className="p-4"><EtiquetaTipo tipo={m.tipo} /></td>
+                  <td className="p-4 text-slate-300">{m.detalle}</td>
+                  <td className={`p-4 text-right font-bold ${m.tipo === 'Entrada' ? 'text-emerald-400' : 'text-amber-400'}`}>
                     {m.tipo === 'Entrada' ? '+' : m.tipo === 'Salida' ? '-' : ''}{m.cantidad}
                   </td>
-                  <td className="p-3 text-right whitespace-nowrap">{formatoPrecio(m.precioCompra)}</td>
-                  <td className="p-3 text-right">{m.saldoAnterior}</td>
-                  <td className="p-3 text-right font-bold">{m.saldoNuevo}</td>
+                  <td className="p-4 text-right whitespace-nowrap text-slate-300">{formatoPrecio(m.precioCompra)}</td>
+                  <td className="p-4 text-right text-slate-300">{m.saldoAnterior}</td>
+                  <td className="p-4 text-right font-bold">{m.saldoNuevo}</td>
                 </tr>
               ))}
               {!cargando && !error && movimientosFiltrados.length === 0 && (
-                <tr><td colSpan={10} className="p-10 text-center text-slate-500">No se encontraron movimientos.</td></tr>
+                <tr><td colSpan={10} className="p-8 text-center text-slate-400">No se encontraron movimientos.</td></tr>
               )}
-              {cargando && <tr><td colSpan={10} className="p-10 text-center text-slate-500">Cargando movimientos...</td></tr>}
+              {cargando && <tr><td colSpan={10} className="p-8 text-center text-slate-400">Cargando movimientos...</td></tr>}
             </tbody>
           </table>
         </div>
-        <div className="p-4 bg-slate-50 border-t text-xs text-slate-500">
+        <div className="p-4 border-t border-slate-700 bg-[#0F172A] text-xs text-slate-400">
           Mostrando {movimientosFiltrados.length} movimientos. Los saldos corresponden a cada producto individual.
         </div>
       </div>
@@ -232,15 +385,15 @@ function KardexIndividual({ producto, onClose }) {
     `${API}/kardex/producto/${producto.id}`
   );
   return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-slate-300 rounded-2xl shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
-        <div className="p-6 bg-slate-800 text-white flex justify-between items-center">
+    <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+      <div className="bg-[#1E293B] rounded-2xl shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden border border-slate-600">
+        <div className="p-6 bg-[#334155] text-white flex justify-between items-center">
           <div>
             <div className="flex items-center gap-2">
               <span className="bg-blue-500/20 text-blue-300 text-xs px-2 py-0.5 rounded font-mono">{producto.codigo}</span>
               <h2 className="text-xl font-bold">{producto.nombre}</h2>
             </div>
-            <p className="text-slate-400 text-sm mt-1">Historial de movimientos y auditoría de stock</p>
+            <p className="text-slate-300 text-sm mt-1">Historial de movimientos y auditoría de stock</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Cerrar Kardex"
             className="p-2 hover:bg-slate-700 rounded-lg transition-colors text-slate-300 hover:text-white">
@@ -248,29 +401,29 @@ function KardexIndividual({ producto, onClose }) {
           </button>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 bg-slate-50 border-b border-slate-200 text-sm">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 bg-[#0F172A] border-b border-slate-700 text-sm">
           <div>
-            <p className="text-slate-500 text-xs">Stock Actual:</p>
-            <p className="text-lg font-bold text-slate-800">{producto.stock} Unidades</p>
+            <p className="text-slate-400 text-xs">Stock Actual:</p>
+            <p className="text-lg font-bold text-slate-100">{producto.stock} Unidades</p>
           </div>
           <div>
-            <p className="text-slate-500 text-xs">Precio Compra Actual:</p>
-            <p className="text-lg font-bold text-slate-800">{formatoPrecio(Number(producto.costo))}</p>
+            <p className="text-slate-400 text-xs">Precio Compra Actual:</p>
+            <p className="text-lg font-bold text-slate-100">{formatoPrecio(Number(producto.costo))}</p>
           </div>
           <div>
-            <p className="text-slate-500 text-xs">Costo Promedio:</p>
-            <p className="text-lg font-bold text-slate-800">{formatoPrecio(Number(producto.costoPromedio))}</p>
+            <p className="text-slate-400 text-xs">Costo Promedio:</p>
+            <p className="text-lg font-bold text-slate-100">{formatoPrecio(Number(producto.costoPromedio))}</p>
           </div>
           <div>
-            <p className="text-slate-500 text-xs">Precio de Venta:</p>
-            <p className="text-lg font-bold text-emerald-600">{formatoPrecio(Number(producto.precio))}</p>
+            <p className="text-slate-400 text-xs">Precio de Venta:</p>
+            <p className="text-lg font-bold text-emerald-400">{formatoPrecio(Number(producto.precio))}</p>
           </div>
         </div>
 
         <div className="p-6 overflow-auto flex-1">
-          {error && <p role="alert" className="mb-4 rounded-lg bg-red-50 p-3 text-red-700">{error}</p>}
+          {error && <p role="alert" className="mb-4 rounded-lg border border-rose-800 bg-rose-950 p-3 text-rose-200">{error}</p>}
           <table className="w-full text-left text-sm">
-            <thead className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200">
+            <thead className="bg-[#334155] text-slate-200">
               <tr>
                 <th className="p-3">Fecha y Hora</th>
                 <th className="p-3">Tipo</th>
@@ -281,30 +434,30 @@ function KardexIndividual({ producto, onClose }) {
                 <th className="p-3 text-right">S. Nuevo</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-200">
+            <tbody>
               {movimientos.map(m => (
-                <tr key={m.id} className="hover:bg-slate-50">
-                  <td className="p-3 font-mono text-xs text-slate-500">{m.fecha}</td>
+                <tr key={m.id} className="border-t border-slate-700 hover:bg-slate-700/30">
+                  <td className="p-3 font-mono text-xs text-slate-400">{m.fecha}</td>
                   <td className="p-3"><EtiquetaTipo tipo={m.tipo} /></td>
-                  <td className="p-3 font-medium text-slate-700">{m.detalle}</td>
-                  <td className={`p-3 text-right font-bold ${m.tipo === 'Entrada' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                  <td className="p-3 font-medium text-slate-300">{m.detalle}</td>
+                  <td className={`p-3 text-right font-bold ${m.tipo === 'Entrada' ? 'text-emerald-400' : 'text-amber-400'}`}>
                     {m.tipo === 'Entrada' ? '+' : m.tipo === 'Salida' ? '-' : ''}{m.cantidad}
                   </td>
-                  <td className="p-3 text-right">{formatoPrecio(m.precioCompra)}</td>
-                  <td className="p-3 text-right text-slate-500">{m.saldoAnterior}</td>
-                  <td className="p-3 text-right font-bold text-slate-800">{m.saldoNuevo}</td>
+                  <td className="p-3 text-right text-slate-300">{formatoPrecio(m.precioCompra)}</td>
+                  <td className="p-3 text-right text-slate-400">{m.saldoAnterior}</td>
+                  <td className="p-3 text-right font-bold text-slate-100">{m.saldoNuevo}</td>
                 </tr>
               ))}
-              {cargando && <tr><td colSpan={7} className="p-8 text-center text-slate-500">Cargando movimientos...</td></tr>}
+              {cargando && <tr><td colSpan={7} className="p-8 text-center text-slate-400">Cargando movimientos...</td></tr>}
               {!cargando && !error && movimientos.length === 0 &&
-                <tr><td colSpan={7} className="p-8 text-center text-slate-500">Este producto no tiene movimientos registrados.</td></tr>}
+                <tr><td colSpan={7} className="p-8 text-center text-slate-400">Este producto no tiene movimientos registrados.</td></tr>}
             </tbody>
           </table>
         </div>
-        <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-between items-center text-xs text-slate-500">
+        <div className="p-4 border-t border-slate-700 bg-[#0F172A] flex justify-between items-center text-xs text-slate-400">
           <span className="flex items-center gap-1"><FileText size={14} /> Método de valoración: Costo Promedio Ponderado</span>
           <button type="button" onClick={onClose}
-            className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg font-medium transition-colors">
+            className="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg font-medium transition-colors">
             Cerrar
           </button>
         </div>
