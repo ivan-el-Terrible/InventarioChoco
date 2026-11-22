@@ -40,9 +40,10 @@ CREATE TABLE IF NOT EXISTS productos (
     fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Indices reales de Turso (unico de codigo y busqueda por cod_origen)
-CREATE INDEX IF NOT EXISTS ux_productos_codigo
-    ON productos(codigo) WHERE codigo IS NOT NULL AND codigo <> '';
+-- Indices reales de Turso (busqueda por codigo y cod_origen).
+-- El de codigo NO es unico: el catalogo cargado trama codigos repetidos.
+CREATE INDEX IF NOT EXISTS ix_productos_codigo
+    ON productos(codigo);
 
 CREATE INDEX IF NOT EXISTS ix_productos_cod_origen
     ON productos(cod_origen);

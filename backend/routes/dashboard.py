@@ -84,18 +84,44 @@ def obtener_dashboard():
         )
 
         # =========================================
-        # 3. PRODUCTOS CRITICOS
+        # 3. INVENTARIO POR CATEGORIA + CRITICOS
+        # (una sola consulta: ambas recorren productos x inventario)
         # =========================================
-        criticos = db.execute("""
-            SELECT COUNT(*) AS cantidad
+        filas_inventario = db.execute("""
+            SELECT
+                COALESCE(NULLIF(TRIM(p.categoria), ''), 'Sin categoría')
+                    AS categoria,
+                COALESCE(
+                    SUM(
+                        COALESCE(i.stock, 0) *
+                        COALESCE(i.costo_promedio, 0)
+                    ),
+                    0
+                ) AS valor,
+                SUM(
+                    CASE WHEN COALESCE(i.stock, 0) <= ? THEN 1 ELSE 0 END
+                ) AS criticos
             FROM productos p
             LEFT JOIN inventario i
                 ON i.id_producto = p.id AND i.id_tienda = ?
             WHERE p.activo = 1
-              AND COALESCE(i.stock, 0) <= ?
-        """, (id_tienda, STOCK_CRITICO)).fetchone()
+            GROUP BY COALESCE(
+                NULLIF(TRIM(p.categoria), ''),
+                'Sin categoría'
+            )
+            ORDER BY valor DESC
+        """, (STOCK_CRITICO, id_tienda)).fetchall()
 
-        productos_criticos = int(criticos["cantidad"] or 0)
+        productos_criticos = sum(int(fila["criticos"] or 0)
+                                 for fila in filas_inventario)
+
+        valor_inventario = [
+            {
+                "categoria": fila["categoria"],
+                "valor": round(float(fila["valor"]), 2)
+            }
+            for fila in filas_inventario
+        ]
 
         # =========================================
         # 4. PRODUCTOS MAS VENDIDOS DEL MES
@@ -127,39 +153,6 @@ def obtener_dashboard():
                 "cantidad": float(fila["cantidad_vendida"])
             }
             for fila in filas_vendidos
-        ]
-
-        # =========================================
-        # 5. VALOR DEL INVENTARIO POR TIPO
-        # =========================================
-        filas_inventario = db.execute("""
-            SELECT
-                COALESCE(NULLIF(TRIM(p.categoria), ''), 'Sin categoría')
-                    AS categoria,
-                COALESCE(
-                    SUM(
-                        COALESCE(i.stock, 0) *
-                        COALESCE(i.costo_promedio, 0)
-                    ),
-                    0
-                ) AS valor
-            FROM productos p
-            LEFT JOIN inventario i
-                ON i.id_producto = p.id AND i.id_tienda = ?
-            WHERE p.activo = 1
-            GROUP BY COALESCE(
-                NULLIF(TRIM(p.categoria), ''),
-                'Sin categoría'
-            )
-            ORDER BY valor DESC
-        """, (id_tienda,)).fetchall()
-
-        valor_inventario = [
-            {
-                "categoria": fila["categoria"],
-                "valor": round(float(fila["valor"]), 2)
-            }
-            for fila in filas_inventario
         ]
 
         return jsonify({

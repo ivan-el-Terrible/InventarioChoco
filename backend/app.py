@@ -88,4 +88,6 @@ if __name__ == '__main__':
     # La version portable con pystray se reincorporara al empaquetar.
     from waitress import serve
     print('InventarioChoco: http://127.0.0.1:5000')
-    serve(app, host='127.0.0.1', port=5000, threads=4)
+    # 12 hilos: el frontend lanza varios pedidos en paralelo y si la red a
+    # Turso se corta a mitad de peticion, sobra margen mientras se reconecta.
+    serve(app, host='127.0.0.1', port=5000, threads=12)

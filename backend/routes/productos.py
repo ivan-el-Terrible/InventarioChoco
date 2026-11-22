@@ -2,7 +2,9 @@
 from auth import roles_permitidos
 
 from flask import Blueprint, request, jsonify, session
-from database.database import get_db, tienda_actual, tienda_param
+from database.database import (
+    get_db, tienda_actual, tienda_param, tiendas_activas, invalidar_cache_tiendas
+)
 
 
 productos_bp = Blueprint("productos", __name__)
@@ -49,16 +51,14 @@ CONSULTA_PRODUCTOS = """
 @productos_bp.route("/tiendas", methods=["GET"])
 @roles_permitidos("admin")
 def obtener_tiendas():
-    """Lista las tiendas para los selectores (la principal va primero)."""
+    """Lista las tiendas para los selectores (la principal va primero).
+
+    Usa el cache de 60 s: el selector se pide en cada pagina y sin cache
+    cada visita cuesta una ida y vuelta a Turso (~0.2 s).
+    """
     db = get_db()
     try:
-        filas = db.execute("""
-            SELECT id, nombre, direccion, activo
-            FROM tiendas
-            WHERE activo = 1
-            ORDER BY id
-        """).fetchall()
-        return jsonify([dict(f) for f in filas])
+        return jsonify(tiendas_activas(db))
     finally:
         db.close()
 
@@ -80,6 +80,7 @@ def crear_tienda():
             (nombre, direccion)
         )
         db.commit()
+        invalidar_cache_tiendas()
         return jsonify({"mensaje": "Tienda creada correctamente"}), 201
     except Exception:
         db.rollback()
@@ -112,6 +113,7 @@ def actualizar_tienda(id_tienda):
             (nombre, direccion, id_tienda)
         )
         db.commit()
+        invalidar_cache_tiendas()
         return jsonify({"mensaje": "Tienda actualizada correctamente"})
     except Exception:
         db.rollback()
@@ -212,12 +214,7 @@ def exportar_productos():
             request.args.get("id_tienda", type=int)
         )
 
-        tiendas = db.execute("""
-            SELECT id, nombre
-            FROM tiendas
-            WHERE activo = 1
-            ORDER BY id
-        """).fetchall()
+        tiendas = tiendas_activas(db)
 
         filas = db.execute("""
             SELECT
@@ -278,7 +275,9 @@ def exportar_productos():
                 datos["precio_venta"] = float(fila["precio_venta"] or 0)
 
         return jsonify({
-            "tiendas": [dict(t) for t in tiendas],
+            "tiendas": [
+                {"id": t["id"], "nombre": t["nombre"]} for t in tiendas
+            ],
             "id_tienda_precios": id_tienda_precios,
             "productos": productos
         }), 200
@@ -483,7 +482,7 @@ def registrar_entrada(id_producto):
             return jsonify({"error": "Producto no encontrado"}), 404
 
         inventario = db.execute("""
-            SELECT stock, precio_compra, costo_promedio
+            SELECT stock, precio_compra, costo_promedio, precio_venta
             FROM inventario
             WHERE id_tienda = ? AND id_producto = ?
         """, (id_tienda, id_producto)).fetchone()
@@ -601,8 +600,9 @@ def registrar_entrada(id_producto):
             "costo_unitario": costo_unitario
         }), 201
 
-    except Exception:
+    except Exception as e:
         db.rollback()
+        print("ERROR AL REGISTRAR ENTRADA:", repr(e))
         return jsonify({
             "error": "No se pudo registrar la entrada"
         }), 500

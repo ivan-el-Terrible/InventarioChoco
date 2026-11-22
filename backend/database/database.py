@@ -8,6 +8,7 @@ que la nube, definida en schema.sql.
 import os
 import sqlite3
 import threading
+import time
 from pathlib import Path
 
 import libsql
@@ -60,19 +61,51 @@ class Fila:
 
 
 class CursorCompatible:
-    def __init__(self, cursor):
+    def __init__(self, cursor, reejecutar=None, sql=None, parametros=None):
         self._cursor = cursor
+        # Para reintentar la lectura si la conexion a la nube se corto.
+        self._reejecutar = reejecutar
+        self._sql = sql
+        self._parametros = parametros
         self._nombres = [col[0] for col in (cursor.description or [])]
 
+    def _con_reintento(self, operacion):
+        """Lee filas y reintenta UNA vez si fallo la red (solo SELECT).
+
+        El error puede aparecer al leer el cuerpo de la respuesta (fetch),
+        no solo al ejecutar; ahi la conexion queda en mal estado y hay que
+        reconectar y volver a consultar.
+        """
+        try:
+            return operacion()
+        except Exception as error:
+            es_select = (
+                isinstance(self._sql, str)
+                and self._sql.lstrip().upper().startswith('SELECT')
+            )
+            if (self._reejecutar is None or not es_select
+                    or not _es_error_deconexion(error)):
+                raise
+            nuevo = self._reejecutar(self._sql, self._parametros)
+            self._cursor = nuevo._cursor
+            self._nombres = nuevo._nombres
+            return operacion()
+
     def fetchone(self):
-        fila = self._cursor.fetchone()
-        return None if fila is None else Fila(self._nombres, fila)
+        return self._con_reintento(
+            lambda: self._leer_fila(self._cursor.fetchone()))
 
     def fetchall(self):
-        return [Fila(self._nombres, fila) for fila in self._cursor.fetchall()]
+        return self._con_reintento(
+            lambda: [Fila(self._nombres, f) for f in self._cursor.fetchall()])
 
     def fetchmany(self, size=1):
-        return [Fila(self._nombres, fila) for fila in self._cursor.fetchmany(size)]
+        return self._con_reintento(
+            lambda: [Fila(self._nombres, f)
+                     for f in self._cursor.fetchmany(size)])
+
+    def _leer_fila(self, fila):
+        return None if fila is None else Fila(self._nombres, fila)
 
     def __iter__(self):
         for fila in self._cursor:
@@ -198,6 +231,7 @@ class ConexionNube:
             except Exception:
                 pass  # Turso puede rechazar el PRAGMA; no bloquea.
             _hilos.conexion_nube = conn
+            _hilos.conexion_creada = time.monotonic()
         return conn
 
     def _reconectar(self):
@@ -220,7 +254,15 @@ class ConexionNube:
             return getattr(self._reconectar(), metodo)(*args)
 
     def execute(self, sql, parametros=()):
-        return CursorCompatible(self._llamar('execute', sql, parametros))
+        cursor = self._llamar('execute', sql, parametros)
+        # La lectura (fetch) tambien puede fallar por red: se le pasa el
+        # modo de reconectar y volver a ejecutar para reintentarla.
+        return CursorCompatible(
+            cursor,
+            reejecutar=lambda sql_, params: self.execute(sql_, params),
+            sql=sql,
+            parametros=parametros
+        )
 
     def executemany(self, sql, filas):
         return CursorCompatible(self._llamar('executemany', sql, filas))
@@ -235,8 +277,17 @@ class ConexionNube:
         self._llamar('rollback')
 
     def close(self):
-        """No cierra: la conexion se reutiliza en la siguiente peticion."""
-        pass
+        """No cierra: la conexion se reutiliza. Solo se recicla cuando ya
+        es vieja (5 minutos), para no arrastrar sockets en mal estado que
+        dejan hilos colgados esperando una respuesta que nunca llega."""
+        conn = getattr(_hilos, 'conexion_nube', None)
+        edad = time.monotonic() - getattr(_hilos, 'conexion_creada', 0)
+        if conn is not None and edad > _EDAD_MAXIMA_CONEXION:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            _hilos.conexion_nube = None
 
     def __enter__(self):
         return self
@@ -251,6 +302,9 @@ class ConexionNube:
 
 _hilos = threading.local()
 
+# Edad maxima de una conexion reutilizada antes de reciclarla.
+_EDAD_MAXIMA_CONEXION = 300  # segundos
+
 
 def _es_error_deconexion(error):
     """True si el error parece de red/sesion (no un error de SQL)."""
@@ -259,8 +313,9 @@ def _es_error_deconexion(error):
         return False
     marcas = (
         'dns error', 'http error', 'timeout', 'timed out', 'connection',
-        'connect', 'broken pipe', 'socket', 'unreachable', 'reset by peer',
-        'stream error',
+        'connect', 'conexión', 'conexion', 'broken pipe', 'socket',
+        'unreachable', 'reset by peer', 'stream error', 'host remoto',
+        'os error', 'closed before message',
     )
     return any(marca in texto for marca in marcas)
 
@@ -283,15 +338,13 @@ def tienda_actual(db, id_tienda_usuario=None):
     """Id de tienda a usar: la del usuario o la primera tienda activa."""
     if id_tienda_usuario:
         return int(id_tienda_usuario)
-    fila = db.execute(
-        "SELECT id FROM tiendas WHERE activo = 1 ORDER BY id LIMIT 1"
-    ).fetchone()
-    if fila is None:
+    tiendas = tiendas_activas(db)
+    if not tiendas:
         raise RuntimeError(
             'No hay tiendas registradas en Turso. Configura el sistema inicial '
             'para crear la primera tienda.'
         )
-    return int(fila['id'])
+    return int(tiendas[0]['id'])
 
 
 def tienda_param(db, rol, id_tienda_usuario=None, id_tienda_param=None):
@@ -300,13 +353,39 @@ def tienda_param(db, rol, id_tienda_usuario=None, id_tienda_param=None):
     Si el parámetro no existe o no está activo se usa el valor por defecto.
     """
     if rol == 'admin' and id_tienda_param:
-        fila = db.execute(
-            "SELECT id FROM tiendas WHERE id = ? AND activo = 1",
-            (id_tienda_param,)
-        ).fetchone()
-        if fila:
-            return int(fila['id'])
+        try:
+            solicitada = int(id_tienda_param)
+        except (TypeError, ValueError):
+            solicitada = None
+        if solicitada:
+            for tienda in tiendas_activas(db):
+                if int(tienda['id']) == solicitada:
+                    return solicitada
     return tienda_actual(db, id_tienda_usuario)
+
+
+# Cache de tiendas activas: el selector y tienda_actual/tienda_param se
+# consultan en cada peticion y cada ida y vuelta a Turso cuesta ~0.2 s.
+_TIENDAS_TTL = 60  # segundos
+_cache_tiendas = {'datos': None, 'expira': 0.0}
+
+
+def tiendas_activas(db):
+    """Tiendas activas (ordenadas por id) cacheadas 60 s."""
+    ahora = time.monotonic()
+    if _cache_tiendas['datos'] is None or ahora > _cache_tiendas['expira']:
+        filas = db.execute(
+            "SELECT id, nombre, direccion, activo "
+            "FROM tiendas WHERE activo = 1 ORDER BY id"
+        ).fetchall()
+        _cache_tiendas['datos'] = [dict(f) for f in filas]
+        _cache_tiendas['expira'] = ahora + _TIENDAS_TTL
+    return _cache_tiendas['datos']
+
+
+def invalidar_cache_tiendas():
+    """Se llama al crear/editar una tienda para refrescar el cache."""
+    _cache_tiendas['datos'] = None
 
 
 def _tablas(conn):
