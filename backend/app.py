@@ -26,9 +26,20 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = os.environ.get('APP_HTTPS', '0') == '1'
 
-CORS(app, origins=['http://localhost:5173'], supports_credentials=True)
+# Origenes CORS: por defecto el dev de Vite; en un host se amplian con
+# la variable CORS_ORIGINS (separados por coma). Si el backend sirve el
+# frontend desde el MISMO dominio no hace falta tocar nada.
+_ORIGENES = ['http://localhost:5173']
+if os.environ.get('CORS_ORIGINS'):
+    _ORIGENES += [o.strip() for o in os.environ['CORS_ORIGINES'].split(',')
+                  if o.strip()]
+CORS(app, origins=_ORIGENES, supports_credentials=True)
 
-init_db()
+# La verificacion de tablas cuesta varios viajes a Turso: en Vercel
+# (funciones serverless) se omite con SKIP_INIT_DB=1 porque la base ya
+# esta verificada y cada arranque frio debe ser rapido.
+if os.environ.get('SKIP_INIT_DB', '0') != '1':
+    init_db()
 
 app.register_blueprint(productos_bp)
 app.register_blueprint(ventas_bp)
@@ -104,6 +115,11 @@ if __name__ == '__main__':
 
     from waitress import serve
 
+    # En un host (Render/Railway/etc.) se define HOST=0.0.0.0 y PORT=8080.
+    # En local no hay que configurar nada: sigue en 127.0.0.1:5000.
+    _host = os.environ.get('HOST', '127.0.0.1')
+    _puerto = int(os.environ.get('PORT', '5000'))
+
     def vigia():
         """Vigia anti-congelamiento (la "base no carga").
 
@@ -117,7 +133,7 @@ if __name__ == '__main__':
             time.sleep(60)
             try:
                 urllib.request.urlopen(
-                    'http://127.0.0.1:5000/api/estado', timeout=10
+                    f'http://127.0.0.1:{_puerto}/api/estado', timeout=10
                 ).read()
                 fallos = 0
             except Exception:
@@ -136,14 +152,14 @@ if __name__ == '__main__':
 
     threading.Thread(target=vigia, daemon=True).start()
 
-    print('InventarioChoco: http://127.0.0.1:5000')
+    print(f'InventarioChoco: http://{_host}:{_puerto}')
     # 12 hilos: el frontend lanza varios pedidos en paralelo y si la red a
     # Turso se corta a mitad de peticion, sobra margen mientras se reconecta.
     # Si el vigia relanza el servidor, el puerto puede tardar un instante en
     # liberarse: se reintenta en lugar de morir.
     for intento in range(10):
         try:
-            serve(app, host='127.0.0.1', port=5000, threads=12)
+            serve(app, host=_host, port=_puerto, threads=12)
             break
         except OSError:
             print(f'puerto 5000 ocupado, reintentando ({intento + 1}/10)...',
