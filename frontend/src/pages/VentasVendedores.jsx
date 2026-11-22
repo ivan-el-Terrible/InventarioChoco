@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ReceiptText, Users, DollarSign, Trash2, X, ShieldAlert } from 'lucide-react';
+import { ReceiptText, Users, DollarSign, Trash2, X, ShieldAlert, Printer, FileSpreadsheet } from 'lucide-react';
 import useAutoRefetch from '../hooks/useAutoRefetch';
 import SelectorTienda from '../components/SelectorTienda';
+import AvisoPurga from '../components/AvisoPurga';
+import { imprimirDocumento, escapar } from '../utils/impresion';
+import { generarExcel } from '../utils/excel';
 
 const API = '';
 
@@ -11,6 +14,8 @@ export default function VentasVendedores() {
   const [vendedor, setVendedor] = useState('todos');
   const [tiendaSeleccionada, setTiendaSeleccionada] = useState('');
   const [error, setError] = useState('');
+  const [tiendas, setTiendas] = useState([]);
+  const [exportando, setExportando] = useState(false);
 
   // Purga de registros con más de 3 meses (solo admin).
   const [modalPurga, setModalPurga] = useState(false);
@@ -49,6 +54,22 @@ export default function VentasVendedores() {
     cargarDatos();
   }, [tiendaSeleccionada]);
 
+  // Nombres de tiendas para la impresion y el Excel (mismo selector).
+  useEffect(() => {
+    let activo = true;
+    (async () => {
+      try {
+        const r = await fetch(`${API}/tiendas`, { credentials: 'include' });
+        if (!r.ok) return;
+        const datos = await r.json();
+        if (activo && Array.isArray(datos)) setTiendas(datos);
+      } catch {
+        /* sin nombres: se muestra el id */
+      }
+    })();
+    return () => { activo = false; };
+  }, []);
+
   // Las ventas nuevas aparecen solas sin recargar la página.
   useAutoRefetch(cargarDatos, 15000);
 
@@ -69,6 +90,92 @@ export default function VentasVendedores() {
 
   const nombreVendedor = (id) =>
     usuarios.find((u) => u.id === id)?.nombre || 'Sin asignar';
+
+  // Etiqueta del vendedor elegido en el filtro (para impresion y Excel).
+  const etiquetaVendedor = () => {
+    if (vendedor === 'todos') return 'Todos los usuarios';
+    const u = vendedores.find((x) => String(x.id) === String(vendedor));
+    return u ? u.nombre : `Usuario #${vendedor}`;
+  };
+
+  // Nombre de la tienda elegida en el filtro.
+  const nombreTiendaActual = () => {
+    const t = tiendas.find((x) => String(x.id) === String(tiendaSeleccionada));
+    return t ? t.nombre : 'Tienda por defecto';
+  };
+
+  // Imprime las ventas del vendedor/tienda elegidos en los filtros.
+  const imprimirVentas = () => {
+    const filas = ventasFiltradas.map((v) => `
+      <tr>
+        <td>#${escapar(v.id)}</td>
+        <td>${escapar(v.fecha || '—')}</td>
+        <td>${escapar(nombreVendedor(v.id_vendedor))}</td>
+        <td>${escapar(v.nombre_cliente || 'Consumidor final')}</td>
+        <td>${escapar(v.tienda || '—')}</td>
+        <td>${escapar(v.productos || 'Sin productos')}</td>
+        <td class="ctr">${escapar(v.cantidades || '—')}</td>
+        <td class="num">$${Number(v.total || 0).toFixed(2)}</td>
+      </tr>`).join('');
+
+    imprimirDocumento({
+      titulo: 'Ventas por vendedor',
+      subtitulo: `Vendedor: ${escapar(etiquetaVendedor())} · Tienda: ${escapar(nombreTiendaActual())}`,
+      encabezado: `Fecha de impresión: ${new Date().toLocaleString('es-BO')} · ${ventasFiltradas.length} venta(s)`,
+      tabla: `
+        <table>
+          <thead>
+            <tr>
+              <th>N.º venta</th>
+              <th>Fecha</th>
+              <th>Vendedor</th>
+              <th>Cliente</th>
+              <th>Tienda</th>
+              <th>Producto(s)</th>
+              <th class="ctr">Cantidad</th>
+              <th class="num">Total</th>
+            </tr>
+          </thead>
+          <tbody>${filas}</tbody>
+          <tfoot>
+            <tr class="total">
+              <td colspan="7">Total vendido</td>
+              <td class="num">$${total.toFixed(2)}</td>
+            </tr>
+          </tfoot>
+        </table>`,
+      pie: 'InventarioChoco · Documento generado desde Ventas por vendedor.'
+    });
+  };
+
+  // Exporta a Excel las ventas del vendedor/tienda elegidos en los filtros.
+  const exportarExcel = async () => {
+    if (exportando) return;
+    setExportando(true);
+    setError('');
+    try {
+      const filas = ventasFiltradas.map((v) => ({
+        'N.º Venta': `#${v.id}`,
+        'Fecha': v.fecha || '',
+        'Vendedor': nombreVendedor(v.id_vendedor),
+        'Cliente': v.nombre_cliente || 'Consumidor final',
+        'Tienda': v.tienda || '',
+        'Producto(s)': v.productos || '',
+        'Cantidades': v.cantidades || '',
+        'Total ($)': Number(Number(v.total || 0).toFixed(2))
+      }));
+
+      await generarExcel(
+        `ventas_${etiquetaVendedor().replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+        [{ nombre: 'Ventas', filas }]
+      );
+    } catch (err) {
+      console.error('Error al exportar a Excel:', err);
+      setError('No se pudo exportar las ventas a Excel.');
+    } finally {
+      setExportando(false);
+    }
+  };
 
   // Abre el modal y trae el conteo de lo que se borraría.
   const abrirPurga = async () => {
@@ -114,6 +221,9 @@ export default function VentasVendedores() {
 
   return (
     <div className="min-h-screen bg-[#0F172A] p-6 text-slate-100">
+      {/* AVISO DE PURGA AUTOMATICA (con copia de seguridad) */}
+      <AvisoPurga />
+
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Ventas por vendedor</h1>
@@ -170,6 +280,28 @@ export default function VentasVendedores() {
           valor={tiendaSeleccionada}
           onChange={setTiendaSeleccionada}
         />
+
+        {/* Imprimir / Excel de las ventas con los filtros elegidos */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={imprimirVentas}
+            disabled={ventasFiltradas.length === 0}
+            title="Imprimir las ventas del vendedor y tienda seleccionados"
+            className="flex items-center gap-2 rounded-lg bg-slate-600 px-4 py-2 font-medium text-white transition-all shadow-md hover:bg-slate-500 disabled:opacity-50"
+          >
+            <Printer size={17} /> Imprimir ventas
+          </button>
+          <button
+            type="button"
+            onClick={exportarExcel}
+            disabled={exportando || ventasFiltradas.length === 0}
+            title="Guardar en Excel las ventas del vendedor y tienda seleccionados"
+            className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 font-medium text-white transition-all shadow-md hover:bg-emerald-500 disabled:opacity-50"
+          >
+            <FileSpreadsheet size={17} /> {exportando ? 'Generando...' : 'Excel'}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -232,15 +364,21 @@ export default function VentasVendedores() {
             <div className="mb-4 rounded-lg border border-slate-600 bg-slate-800 p-3 text-sm text-slate-300">
               <p className="mb-2 flex items-center gap-2 font-semibold text-slate-200">
                 <ShieldAlert size={15} className="text-amber-400" />
-                Se eliminarán con más de 3 meses:
+                Se eliminarán todos los datos de hace 3 meses:
               </p>
               <ul className="space-y-1 text-slate-300">
-                <li>• Ventas de todos los vendedores (y su detalle)</li>
+                <li>• Ventas de todos los usuarios (y su detalle)</li>
                 <li>• Gastos registrados</li>
                 <li>• Movimientos del kardex</li>
+                <li>• Vendedores y administradores sin ventas hace 3 meses</li>
               </ul>
               <p className="mt-2 text-emerald-300">
-                Se mantienen siempre: inventario, usuarios y productos.
+                Se mantienen siempre: inventario, productos y tiendas.
+                Siempre queda al menos un administrador activo para poder entrar.
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                Lo mismo se elimina de forma automática al cumplir los 3 meses
+                (con aviso de sacar copia 5 días antes).
               </p>
             </div>
 
@@ -266,6 +404,10 @@ export default function VentasVendedores() {
                   <p className="text-slate-400 text-xs">Kardex</p>
                   <p className="text-lg font-bold text-white">{previa.kardex}</p>
                 </div>
+                <div className="rounded-lg border border-slate-600 bg-[#0F172A] p-3">
+                  <p className="text-slate-400 text-xs">Vendedores sin ventas</p>
+                  <p className="text-lg font-bold text-white">{previa.usuarios_inactivos ?? 0}</p>
+                </div>
                 <p className="col-span-2 text-xs text-slate-400">
                   Corte: registros anteriores al {previa.fecha_corte}.
                 </p>
@@ -278,7 +420,8 @@ export default function VentasVendedores() {
                 <p className="mt-1">
                   Eliminados — ventas: {resultado.eliminado.ventas}, detalle:{' '}
                   {resultado.eliminado.detalle_ventas}, gastos:{' '}
-                  {resultado.eliminado.gastos}, kardex: {resultado.eliminado.kardex}.
+                  {resultado.eliminado.gastos}, kardex: {resultado.eliminado.kardex},
+                  vendedores: {resultado.eliminado.usuarios}.
                 </p>
               </div>
             )}

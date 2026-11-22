@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import {
   X, ArrowUpRight, ArrowDownLeft, FileText,
-  Search, ClipboardList, Package, RotateCcw, Printer
+  Search, ClipboardList, Package, RotateCcw, Printer, FileSpreadsheet
 } from 'lucide-react';
 import SelectorTienda from '../../components/SelectorTienda';
 import { imprimirDocumento, escapar } from '../../utils/impresion';
+import { generarExcel } from '../../utils/excel';
 
 const API = '';
 
@@ -25,6 +26,7 @@ function adaptarMovimiento(m) {
       : String(m.tipo_movimiento ?? 'Otro');
   return {
     id: m.id,
+    idProducto: m.id_producto,
     fecha: String(m.fecha ?? ''),
     codOrigen: m.codOrigi ?? '',
     codigo: m.codigo ?? '',
@@ -97,6 +99,7 @@ function KardexGeneral() {
   const [fechaFin, setFechaFin] = useState('');
   const [tiendaSeleccionada, setTiendaSeleccionada] = useState('');
   const [tiendas, setTiendas] = useState([]);
+  const [exportando, setExportando] = useState(false);
   const urlKardex = tiendaSeleccionada
     ? `${API}/kardex?id_tienda=${encodeURIComponent(tiendaSeleccionada)}`
     : `${API}/kardex`;
@@ -137,14 +140,15 @@ function KardexGeneral() {
     setBusqueda(''); setTipoFiltro('Todos'); setFechaInicio(''); setFechaFin('');
   };
 
+  // Nombre de la tienda elegida (para impresion y Excel).
+  const nombreTiendaActual = () => tiendaSeleccionada
+    ? (tiendas.find((t) => String(t.id) === String(tiendaSeleccionada))?.nombre || `Tienda #${tiendaSeleccionada}`)
+    : (tiendas[0]?.nombre || '—');
+
   // Imprime el Kardex filtrado (solo admin: la ruta es de administrador).
   const imprimirKardex = () => {
-    const nombreTienda = tiendaSeleccionada
-      ? (tiendas.find((t) => String(t.id) === String(tiendaSeleccionada))?.nombre || `Tienda #${tiendaSeleccionada}`)
-      : 'Mi tienda (por defecto)';
-
     const filtros = [
-      `Tienda: ${nombreTienda}`,
+      `Tienda: ${nombreTiendaActual()}`,
       busqueda.trim() ? `Búsqueda: "${busqueda.trim()}"` : null,
       tipoFiltro !== 'Todos' ? `Tipo: ${tipoFiltro}` : null,
       fechaInicio || fechaFin
@@ -192,9 +196,40 @@ function KardexGeneral() {
     });
   };
 
+  // Guarda en Excel el Kardex filtrado (mismos filtros que la pantalla).
+  const exportarExcel = async () => {
+    if (exportando) return;
+    setExportando(true);
+    try {
+      const filas = movimientosFiltrados.map((m) => ({
+        'ID PRODUCTO': m.idProducto ?? '',
+        'Fecha': m.fecha,
+        'Cod. Origen': m.codOrigen || '',
+        'Código': m.codigo || '',
+        'Producto': m.producto,
+        'Movimiento': m.tipo,
+        'Detalle': m.detalle,
+        'Cantidad': m.cantidad,
+        'P. Compra ($)': m.precioCompra == null ? '' : Number(m.precioCompra.toFixed(2)),
+        'Saldo anterior': m.saldoAnterior,
+        'Saldo nuevo': m.saldoNuevo
+      }));
+
+      await generarExcel(
+        `kardex_${nombreTiendaActual().replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+        [{ nombre: 'Kardex', filas }]
+      );
+    } catch (err) {
+      console.error('Error al exportar el Kardex:', err);
+    } finally {
+      setExportando(false);
+    }
+  };
+
   return (
     <div className="p-6 space-y-6 bg-[#0F172A] min-h-screen text-slate-100">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      {/* Encabezado fijo: titulo, tienda, imprimir y guardar en Excel */}
+      <div className="sticky top-0 z-30 -mx-6 flex flex-wrap items-center justify-between gap-3 border-b border-slate-700/60 bg-[#0F172A] px-6 py-4">
         <div className="flex items-center gap-3">
           <ClipboardList className="text-yellow-500" size={30} />
           <div>
@@ -216,6 +251,15 @@ function KardexGeneral() {
             className="flex items-center gap-2 bg-slate-600 hover:bg-slate-500 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-md disabled:opacity-50"
           >
             <Printer size={17} /> Imprimir Kardex
+          </button>
+          <button
+            type="button"
+            onClick={exportarExcel}
+            disabled={exportando || movimientosFiltrados.length === 0}
+            title="Guardar en Excel el Kardex filtrado"
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-md disabled:opacity-50"
+          >
+            <FileSpreadsheet size={17} /> {exportando ? 'Generando...' : 'Excel'}
           </button>
         </div>
       </div>
@@ -287,20 +331,21 @@ function KardexGeneral() {
           <h2 className="font-bold text-slate-100">Historial de movimientos</h2>
           <p className="text-xs text-slate-400 mt-1">Entradas y salidas de todos los productos</p>
         </div>
-        <div className="overflow-x-auto">
+        {/* Solo las filas se desplazan: el encabezado queda fijo */}
+        <div className="overflow-auto max-h-[62vh]">
           <table className="w-full text-sm text-left">
-            <thead className="bg-[#334155] text-slate-200">
+            <thead className="text-slate-200">
               <tr>
-                <th className="p-4">Fecha</th>
-                <th className="p-4">Cod_Origen</th>
-                <th className="p-4">Código</th>
-                <th className="p-4">Producto</th>
-                <th className="p-4">Movimiento</th>
-                <th className="p-4">Documento</th>
-                <th className="p-4 text-right">Cantidad</th>
-                <th className="p-4 text-right">P. Compra</th>
-                <th className="p-4 text-right">S. anterior</th>
-                <th className="p-4 text-right">S. nuevo</th>
+                <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] p-4">Fecha</th>
+                <th className="sticky top-0 z-10 bg-[#334155] p-4">Cod_Origen</th>
+                <th className="sticky top-0 z-10 bg-[#334155] p-4">Código</th>
+                <th className="sticky top-0 z-10 bg-[#334155] p-4">Producto</th>
+                <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] p-4">Movimiento</th>
+                <th className="sticky top-0 z-10 bg-[#334155] p-4">Documento</th>
+                <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] p-4 text-right">Cantidad</th>
+                <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] p-4 text-right">P. Compra</th>
+                <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] p-4 text-right">S. anterior</th>
+                <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] p-4 text-right">S. nuevo</th>
               </tr>
             </thead>
             <tbody>

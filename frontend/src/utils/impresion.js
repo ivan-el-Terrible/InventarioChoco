@@ -25,10 +25,12 @@ export function imprimirDocumento({ titulo, subtitulo, encabezado, tabla, pie })
     thead th {
       background: #e2e8f0;
       border: 1px solid #94a3b8;
-      padding: 6px 8px;
-      text-align: left;
-      font-size: 11px;
+      padding: 8px 10px;
+      font-size: 16px;
+      font-weight: 700;
       text-transform: uppercase;
+      text-align: center;
+      vertical-align: middle;
     }
     tbody td { border: 1px solid #cbd5e1; padding: 5px 8px; font-size: 11px; }
     tbody tr:nth-child(even) { background: #f8fafc; }

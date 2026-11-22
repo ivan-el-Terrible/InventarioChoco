@@ -1,16 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Plus, Search, AlertTriangle, Eye, Edit, Package, DollarSign, Store, X, Pencil, Printer, FileSpreadsheet } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import FormProducto from './FormProducto';
 import Kardex from './Kardex';
 import useAutoRefetch from '../../hooks/useAutoRefetch';
 import { imprimirDocumento, escapar } from '../../utils/impresion';
+import { generarExcel } from '../../utils/excel';
 
 export default function ListaProductos({ usuario }) {
 
   const esAdmin = usuario?.rol === 'admin';
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const busquedaURL = searchParams.get('buscar') ?? '';
   const [productos, setProductos] = useState([]);
   const [cargando, setCargando] = useState(true);
@@ -29,6 +30,8 @@ export default function ListaProductos({ usuario }) {
   const [nuevoPrecioVenta, setNuevoPrecioVenta] = useState('');
   const [guardandoPrecio, setGuardandoPrecio] = useState(false);
   const [errorPrecio, setErrorPrecio] = useState('');
+  const [exportando, setExportando] = useState(false);
+  const [errorExcel, setErrorExcel] = useState('');
 
   // silencioso = true evita el parpadeo de "Cargando" en la auto-actualización.
   const cargarProductos = useCallback(async (silencioso = false) => {
@@ -105,8 +108,9 @@ export default function ListaProductos({ usuario }) {
     return () => { activo = false; };
   }, [esAdmin]);
 
-  // Precios y stock actualizados sin recargar (p. ej. si el admin cambia un precio).
-  useAutoRefetch(() => { cargarProductos(true); }, 15000);
+  // Precios y stock actualizados sin recargar. Con ~3000 productos se
+  // espacia a 30 s para no recargar el catalogo entero tan seguido.
+  useAutoRefetch(() => { cargarProductos(true); }, 30000);
 
   const abrirModalTienda = () => {
     setTiendaEditId(null);
@@ -206,6 +210,13 @@ export default function ListaProductos({ usuario }) {
     }
   };
 
+  // Doble clic en una fila: abrir EntradaStock con el producto ya elegido
+  // para incrementar su cantidad (solo administrador).
+  const irAEntradaStock = (p) => {
+    if (!esAdmin) return;
+    navigate(`/inventario/entradas?producto=${encodeURIComponent(p.id)}`);
+  };
+
   const textoBusqueda = busqueda.toLowerCase().trim();
   const productosFiltrados = productos.filter((p) => (
     p.nombre.toLowerCase().includes(textoBusqueda) ||
@@ -220,13 +231,14 @@ export default function ListaProductos({ usuario }) {
   const nombreTiendaActual = () => {
     if (!esAdmin) return 'Mi tienda';
     const t = tiendas.find((x) => String(x.id) === String(tiendaSeleccionada));
-    return t ? t.nombre : 'Mi tienda (por defecto)';
+    return (t && t.nombre) || (tiendas[0] && tiendas[0].nombre) || 'Mi tienda';
   };
 
   // Imprime la lista de productos (con todos los detalles) de la tienda actual.
   const imprimirLista = () => {
     const filas = productosFiltrados.map((p) => `
       <tr>
+        <td>${escapar(p.id)}</td>
         <td>${escapar(p.codOrigen || '—')}</td>
         <td>${escapar(p.codigo || '—')}</td>
         <td>${escapar(p.nombre)}${p.descripcion ? `<br><small>${escapar(p.descripcion)}</small>` : ''}</td>
@@ -251,6 +263,7 @@ export default function ListaProductos({ usuario }) {
         <table>
           <thead>
             <tr>
+              <th>ID producto</th>
               <th>Cod. Origen</th>
               <th>Código</th>
               <th>Producto</th>
@@ -267,7 +280,7 @@ export default function ListaProductos({ usuario }) {
           <tbody>${filas}</tbody>
           <tfoot>
             <tr class="total">
-              <td colspan="7">Totales</td>
+              <td colspan="8">Totales</td>
               <td class="num">—</td>
               <td class="num">$${totalValor.toFixed(2)}</td>
               <td class="num">—</td>
@@ -280,81 +293,74 @@ export default function ListaProductos({ usuario }) {
   };
 
   // Exporta a Excel la lista completa de productos con el stock por tienda.
+  // UN solo pedido al backend (/productos/exportar) para que sea rapido y el
+  // archivo se descargue con el mismo click.
   const exportarExcel = async () => {
+    if (exportando) return;
+    setExportando(true);
+    setErrorExcel('');
     try {
-      let listaTiendas = tiendas;
-      if (!listaTiendas.length) {
-        const respuesta = await fetch('/tiendas', { credentials: 'include' });
-        if (respuesta.ok) listaTiendas = await respuesta.json();
+      const query = tiendaSeleccionada
+        ? `?id_tienda=${encodeURIComponent(tiendaSeleccionada)}`
+        : '';
+      const respuesta = await fetch(`/productos/exportar${query}`, {
+        credentials: 'include'
+      });
+      if (!respuesta.ok) {
+        throw new Error(respuesta.status === 401
+          ? 'Tu sesión ha caducado. Vuelve a iniciar sesión.'
+          : 'No se pudo obtener la lista para el Excel.');
       }
+      const datos = await respuesta.json();
 
-      // Stock y precios de cada tienda activa.
-      const porTienda = [];
-      if (listaTiendas.length) {
-        const respuestas = await Promise.all(listaTiendas.map((t) =>
-          fetch(`/productos?id_tienda=${encodeURIComponent(t.id)}`, { credentials: 'include' })
-            .then((r) => (r.ok ? r.json() : []))
-            .catch(() => [])
-        ));
-        listaTiendas.forEach((t, i) => porTienda.push({ nombre: t.nombre, productos: respuestas[i] }));
-      }
-
-      const stockDe = (idProducto, lista) => {
-        const fila = (lista || []).find((x) => Number(x.id) === Number(idProducto));
-        return fila ? Number(fila.stock ?? 0) : 0;
-      };
-
-      const filas = productos.map((p) => {
+      const listaTiendas = datos.tiendas || [];
+      const filas = (datos.productos || []).map((p) => {
         const fila = {
-          'Cod. Origen': p.codOrigen || '',
+          'ID PRODUCTO': p.id,
+          'Cod. Origen': p.cod_origen || '',
           'Código': p.codigo || '',
-          'Producto': p.nombre,
+          'Producto': p.nombre || '',
           'Descripción': p.descripcion || '',
           'Categoría': p.categoria || '',
           'Marca': p.marca || '',
           'Unidad': p.unidad || '',
           'Proveedor': p.proveedor || '',
-          'Tel. Proveedor': p.telefonoProveedor || '',
-          'P. Compra ($)': Number((p.costo ?? 0).toFixed(2)),
-          'C. Promedio ($)': Number((p.costoPromedio ?? 0).toFixed(2)),
-          'P. Venta ($)': Number(p.precio.toFixed(2))
+          'Tel. Proveedor': p.telefono_proveedor || '',
+          'P. Compra ($)': Number((p.precio_compra ?? 0).toFixed(2)),
+          'C. Promedio ($)': Number((p.costo_promedio ?? 0).toFixed(2)),
+          'P. Venta ($)': Number((p.precio_venta ?? 0).toFixed(2))
         };
         let total = 0;
-        porTienda.forEach((t) => {
-          const stock = stockDe(p.id, t.productos);
+        listaTiendas.forEach((t) => {
+          const stock = Number((p.stock_por_tienda || {})[String(t.id)] ?? 0);
           total += stock;
           fila[`Stock - ${t.nombre}`] = stock;
         });
-        if (!porTienda.length) fila['Stock'] = p.stock;
-        fila['Stock Total'] = porTienda.length ? total : p.stock;
+        fila['Stock Total'] = total;
         return fila;
       });
 
-      const hoja = XLSX.utils.json_to_sheet(filas);
-      hoja['!cols'] = Object.keys(filas[0] || {}).map((k) => ({
-        wch: Math.max(12, Math.min(32, k.length + 6))
-      }));
-      const libro = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(libro, hoja, 'Productos');
-
-      const fecha = new Date().toISOString().slice(0, 10);
-      const nombre = `lista_productos_${nombreTiendaActual().replace(/\s+/g, '_')}_${fecha}.xlsx`;
-      XLSX.writeFile(libro, nombre);
+      await generarExcel(
+        `lista_productos_${nombreTiendaActual().replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+        [{ nombre: 'Productos', filas }]
+      );
     } catch (error) {
       console.error('Error al exportar a Excel:', error);
-      setErrorProductos('No se pudo exportar la lista a Excel.');
+      setErrorExcel(error.message || 'No se pudo exportar la lista a Excel.');
+    } finally {
+      setExportando(false);
     }
   };
 
   return (
     <div className="p-6 bg-[#0F172A] min-h-screen text-slate-100">
-      {/* Encabezado */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-center mb-6">
+      {/* Encabezado fijo: se mantiene visible al hacer scroll */}
+      <div className="sticky top-0 z-30 -mx-6 mb-6 flex flex-col gap-4 border-b border-slate-700/60 bg-[#0F172A] px-6 py-4 sm:flex-row sm:justify-between sm:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-100">INVENTARIO DE PRODUCTOS</h1>
           <p className="text-slate-400 text-sm">
             {esAdmin
-              ? 'Administra tus productos, precios y el stock, no te quedes sin stock 0'
+              ? 'Administra tus productos · Doble clic en un producto para registrar entrada de stock'
               : 'Consulta los productos disponibles, precios de venta y existencias.'}
           </p>
         </div>
@@ -412,10 +418,11 @@ export default function ListaProductos({ usuario }) {
             <button
               type="button"
               onClick={exportarExcel}
+              disabled={exportando}
               title="Exportar a Excel la lista completa con el stock por tienda"
-              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-md"
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-md disabled:opacity-60"
             >
-              <FileSpreadsheet size={17} /> Excel
+              <FileSpreadsheet size={17} /> {exportando ? 'Generando...' : 'Excel'}
             </button>
             <button
               type="button"
@@ -489,68 +496,105 @@ export default function ListaProductos({ usuario }) {
           {errorProductos}
         </p>
       )}
+      {errorExcel && (
+        <p className="mb-4 rounded-lg border border-rose-800 bg-rose-950 p-3 text-sm text-rose-200">
+          {errorExcel}
+        </p>
+      )}
 
-      {/* Tabla de productos */}
-      <div className="overflow-x-auto rounded-xl border border-slate-700 bg-[#1E293B]">
+      {/* Tabla de productos: solo las filas hacen scroll, el encabezado fijo */}
+      <div className="overflow-auto max-h-[70vh] rounded-xl border border-slate-700 bg-[#1E293B]">
         <table className="w-full text-left text-sm">
-          <thead className="bg-[#334155] text-slate-200">
-            <tr>
-              <th className="p-4">Cod_Origen</th>
-              <th className="p-4">Código</th>
-              <th className="p-4">Nombre Producto</th>
-              <th className="p-4">Categoría</th>
-              <th className="p-4">Marca</th>
-              <th className="p-4">Unidad</th>
-              {esAdmin && <th className="p-4">Proveedor</th>}
+          <thead className="text-slate-200">
+            <tr className="uppercase">
+              <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] px-3 py-2.5">ID</th>
+              <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] px-3 py-2.5">Cod_Origen</th>
+              <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] px-3 py-2.5">Código</th>
+              <th className="sticky top-0 z-10 bg-[#334155] px-3 py-2.5">Nombre Producto</th>
+              <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] px-3 py-2.5">Categoría</th>
+              <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] px-3 py-2.5">Marca</th>
+              <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] px-3 py-2.5">Unidad</th>
+              {esAdmin && <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] px-3 py-2.5">Proveedor</th>}
               {esAdmin && (
                 <>
-                  <th className="p-4 text-right">P. Compra</th>
-                  <th className="p-4 text-right">C. Promedio</th>
+                  <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] px-3 py-2.5 text-right">P. Compra</th>
+                  <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] px-3 py-2.5 text-right">C. Promedio</th>
                 </>
               )}
-              <th className="p-4 text-right">P. Venta</th>
-              <th className="p-4 text-center">Stock</th>
-              {esAdmin && <th className="p-4 text-center">Acciones</th>}
+              <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] px-3 py-2.5 text-right">P. Venta</th>
+              <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] px-3 py-2.5 text-center">Stock</th>
+              {esAdmin && <th className="sticky top-0 z-10 whitespace-nowrap bg-[#334155] px-3 py-2.5 text-center">Acciones</th>}
             </tr>
           </thead>
           <tbody>
             {productosFiltrados.map((p) => {
               const esBajoStock = p.stock <= p.minStock;
               return (
-                <tr key={p.id} className="border-t border-slate-700 hover:bg-slate-700/30">
-                  <td className="p-4 text-xs font-bold text-slate-300">{p.codOrigen || '—'}</td>
-                  <td className="p-4 text-xs font-bold text-slate-300">{p.codigo || '—'}</td>
-                  <td className="p-4 font-semibold">
-                    {p.nombre}
+                <tr
+                  key={p.id}
+                  onDoubleClick={() => irAEntradaStock(p)}
+                  title={esAdmin ? 'Doble clic para registrar una entrada de stock' : undefined}
+                  className={`border-t border-slate-700 hover:bg-slate-700/30 ${esAdmin ? 'cursor-pointer' : ''}`}
+                >
+                  <td className="px-3 py-2.5 text-xs font-bold text-slate-400">{p.id}</td>
+                  <td className="px-3 py-2.5 text-xs font-bold text-slate-300">
+                    <div className="max-w-[130px] truncate" title={p.codOrigen || undefined}>
+                      {p.codOrigen || '—'}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5 text-xs font-bold text-slate-300">
+                    <div className="max-w-[120px] truncate" title={p.codigo || undefined}>
+                      {p.codigo || '—'}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5 font-semibold">
+                    <div className="max-w-[280px] truncate" title={p.nombre}>
+                      {p.nombre}
+                    </div>
                     {p.descripcion && (
-                      <span className="block text-xs font-normal text-slate-400">
+                      <div
+                        className="max-w-[280px] truncate text-xs font-normal text-slate-400"
+                        title={p.descripcion}
+                      >
                         {p.descripcion}
-                      </span>
+                      </div>
                     )}
                   </td>
-                  <td className="p-4 text-slate-300">{p.categoria || '—'}</td>
-                  <td className="p-4 text-slate-300">{p.marca || '—'}</td>
-                  <td className="p-4 text-slate-300">{p.unidad || '—'}</td>
+                  <td className="px-3 py-2.5 text-slate-300">
+                    <div className="max-w-[100px] truncate" title={p.categoria || undefined}>
+                      {p.categoria || '—'}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5 text-slate-300">
+                    <div className="max-w-[90px] truncate" title={p.marca || undefined}>
+                      {p.marca || '—'}
+                    </div>
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-slate-300">{p.unidad || '—'}</td>
                   {esAdmin && (
-                    <td className="p-4 text-slate-300">
-                      {p.proveedor || '—'}
+                    <td className="px-3 py-2.5 text-slate-300">
+                      <div className="max-w-[140px] truncate" title={p.proveedor || undefined}>
+                        {p.proveedor || '—'}
+                      </div>
                       {p.telefonoProveedor && (
-                        <span className="block text-xs text-slate-400">
-                          {p.telefonoProveedor}
-                        </span>
+                        <div className="text-xs text-slate-400">{p.telefonoProveedor}</div>
                       )}
                     </td>
                   )}
                   {esAdmin && (
                     <>
-                      <td className="p-4 text-right text-slate-300">${(p.costo ?? 0).toFixed(2)}</td>
-                      <td className="p-4 text-right font-semibold text-blue-400">
+                      <td className="whitespace-nowrap px-3 py-2.5 text-right text-slate-300">
+                        ${(p.costo ?? 0).toFixed(2)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold text-blue-400">
                         ${(p.costoPromedio ?? 0).toFixed(2)}
                       </td>
                     </>
                   )}
-                  <td className="p-4 text-right font-semibold">${p.precio.toFixed(2)}</td>
-                  <td className="p-4 text-center">
+                  <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold">
+                    ${p.precio.toFixed(2)}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-center">
                     <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${
                       esBajoStock
                         ? 'bg-red-900 text-red-200'
@@ -560,7 +604,7 @@ export default function ListaProductos({ usuario }) {
                     </span>
                   </td>
                   {esAdmin && (
-                    <td className="p-4">
+                    <td className="px-3 py-2.5">
                       <div className="flex items-center justify-center gap-2">
                         <button
                           type="button"
@@ -592,7 +636,7 @@ export default function ListaProductos({ usuario }) {
             })}
                 {!cargando && !errorProductos && productosFiltrados.length === 0 && (
               <tr>
-                <td colSpan={esAdmin ? 12 : 8} className="p-8 text-center text-slate-400">
+                <td colSpan={esAdmin ? 13 : 9} className="p-8 text-center text-slate-400">
                   No se encontraron productos.
                 </td>
               </tr>

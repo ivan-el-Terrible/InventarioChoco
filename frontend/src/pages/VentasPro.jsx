@@ -231,7 +231,7 @@ export default function VentasPro() {
               placeholder="Busca por codOrigen, código o nombre..." /*este es el buscador de productos */
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-slate-300 border border-slate-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+              className="w-full pl-10 pr-4 py-2 bg-slate-300 border border-slate-100 rounded-xl text-sm text-slate-900 font-semibold placeholder:font-normal placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
             />
           </div>
         </div>
@@ -315,8 +315,8 @@ export default function VentasPro() {
         </div>
       </div>
 
-      {/* SECCIÓN DERECHA: Carrito y Cobro */}
-      <div className="w-full lg:w-96 bg-slate-00 border-l border-slate-200 flex flex-col h-full shadow-lg">
+      {/* SECCIÓN DERECHA: Carrito y Cobro (más ancha, sin scroll interno) */}
+      <div className="w-full lg:w-[26rem] bg-slate-00 border-l border-slate-200 flex flex-col h-full shadow-lg">
         
         {/* Encabezado del Carrito */}
         <div className="p-3 border-b border-slate-200 flex items-center gap-2 bg-slate-500 shrink-0">
@@ -373,16 +373,24 @@ export default function VentasPro() {
           )}
         </div>
 
-        {/* Cliente */}
+        {/* Cliente: gris "plomo" con el valor por defecto, oscuro al escribir */}
         <div className="px-4 pt-2 pb-1 bg-slate-300 shrink-0">
           <label className="block text-xs font-bold text-slate-700 mb-1">Nombre del cliente</label>
-          <input value={nombreCliente} onChange={(e) => setNombreCliente(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-            placeholder="Nombre del cliente" />
+          <input
+            value={nombreCliente}
+            onChange={(e) => setNombreCliente(e.target.value)}
+            className={`w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm ${
+              nombreCliente.trim() === 'Consumidor final'
+                ? 'text-slate-500'
+                : 'text-slate-900 font-semibold'
+            }`}
+            placeholder="Nombre del cliente"
+          />
         </div>
 
-        {/* Totales y Métodos de Pago */}
-        <div className="px-4 py-3 border-t border-slate-100 bg-slate-300 space-y-2 shrink-0 max-h-[70%] overflow-y-auto">
+        {/* Totales y Métodos de Pago: SIEMPRE visibles, sin scroll interno.
+            Solo la lista de artículos arriba se desliza cuando hay muchos. */}
+        <div className="px-4 py-2.5 border-t border-slate-100 bg-slate-300 space-y-2 shrink-0">
           
           <div className="space-y-0.5 text-xs text-slate-600">
 
@@ -483,43 +491,6 @@ export default function VentasPro() {
                 <div className="p-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-sm font-bold text-emerald-700">
                   ${cambio.toFixed(2)}
                 </div>
-              </div>
-            </div>
-          )}
-
-          {/* Resumen de la compra: productos, precio pagado y cambio */}
-          {carrito.length > 0 && (
-            <div className="rounded-xl border border-slate-300 bg-white p-2 space-y-1 text-[11px] text-slate-700 max-h-24 overflow-y-auto">
-              <p className="font-bold text-slate-900 text-[11px] uppercase">
-                Productos de esta compra
-              </p>
-              {carrito.map((item) => (
-                <div key={item.id} className="flex justify-between gap-2">
-                  <span className="truncate">
-                    {item.cantidad} × {item.nombre}
-                  </span>
-                  <span className="font-semibold whitespace-nowrap">
-                    ${(item.precio * item.cantidad).toFixed(2)}
-                  </span>
-                </div>
-              ))}
-              <div className="flex justify-between border-t border-slate-200 pt-1 font-bold text-slate-900">
-                <span>Precio a pagar {conFactura ? '(con factura)' : '(sin factura)'}:</span>
-                <span>${totalActual.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Monto pagado:</span>
-                <span>
-                  {metodoPago === 'efectivo' && montoPagado !== '' && Number.isFinite(Number(montoPagado))
-                    ? `$${Number(montoPagado).toFixed(2)}`
-                    : metodoPago === 'efectivo'
-                      ? '—'
-                      : `Pagado con ${metodoPago}`}
-                </span>
-              </div>
-              <div className="flex justify-between font-bold text-emerald-700">
-                <span>Cambio a devolver:</span>
-                <span>${cambio.toFixed(2)}</span>
               </div>
             </div>
           )}

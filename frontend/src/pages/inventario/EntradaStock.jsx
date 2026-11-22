@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';   {/*importamos react */}
+import { useSearchParams } from 'react-router-dom';
 import { ArrowDownCircle, Plus, CheckCircle, Package, Save, Phone, Building2 } from 'lucide-react';   {/*importamos los iconos de lucide-react */}
 import SelectorTienda from '../../components/SelectorTienda';
 
@@ -9,6 +10,8 @@ export default function EntradaStock() { //duda
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState('');
+  // Producto precargado desde la lista (doble clic en una fila).
+  const [searchParams] = useSearchParams();
 
   const [proveedor, setProveedor] = useState(""); // esto es una variable estaica para almacenar el proveedor inicializada como vacia
   /*esto es para cuando el frontend se muestre un espacio vacio y dentro de este se introducira dato y este sera reemplazado
@@ -76,6 +79,20 @@ export default function EntradaStock() { //duda
   useEffect(() => {
     cargarProductos();
   }, [tiendaSeleccionada]);
+
+  // Producto que llega desde la lista (doble clic): se selecciona solo,
+  // con su precio de compra ya cargado en el campo Costo Unitario (editable).
+  useEffect(() => {
+    const idParam = searchParams.get('producto');
+    if (!idParam || !productos.length) return;
+    const p = productos.find(x => x.id === parseInt(idParam));
+    if (!p) return;
+    setProductoId(String(p.id));
+    setCostoUnitario(String(p.costo ?? 0));
+    setProveedor(p.proveedor || '');
+    setBusqueda(`${p.codOrigen} - ${p.codigo} - ${p.nombre}`);
+    setMostrarResultados(false);
+  }, [searchParams, productos]);
 
   // Al cambiar de producto se cargan sus datos de proveedor para editarlos.
   useEffect(() => {
@@ -326,6 +343,13 @@ export default function EntradaStock() { //duda
                     Código: {productoSeleccionado.codigo}
                     {' | '}
                     Stock: {productoSeleccionado.stock}
+                  </p>
+                  <p className="text-xs text-slate-300">
+                    Precio de compra:{' '}
+                    <span className="font-bold text-emerald-300">
+                      ${(productoSeleccionado.costo ?? 0).toFixed(2)}
+                    </span>
+                    {' '}· Se carga en "Costo Unitario" y puedes modificarlo
                   </p>
 
                   {/* Proveedor del producto (editable, se guarda en productos) */}

@@ -163,7 +163,7 @@ export default function Gastos({ usuario }) {
           <div>
             <p className="text-sm text-slate-400">Tienda</p>
             <p className="text-2xl font-bold">
-              {esAdmin ? (tiendaSeleccionada ? 'Seleccionada' : 'Por defecto') : 'Mi tienda'}
+              {esAdmin ? 'Seleccionada' : 'Mi tienda'}
             </p>
           </div>
         </div>

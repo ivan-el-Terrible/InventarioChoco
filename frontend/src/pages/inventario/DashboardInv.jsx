@@ -5,15 +5,18 @@ import {
   DollarSign,
   AlertTriangle,
   ShoppingBag,
-  RefreshCw
+  RefreshCw,
+  Wallet
 } from 'lucide-react';
 import useAutoRefetch from '../../hooks/useAutoRefetch';
 import SelectorTienda from '../../components/SelectorTienda';
+import AvisoPurga from '../../components/AvisoPurga';
 
 const API = '';
 
 const datosIniciales = {
   ventas_mes: 0,
+  gastos_mes: 0,
   ganancia_estimada: 0,
   ordenes_realizadas: 0,
   ticket_promedio: 0,
@@ -134,8 +137,11 @@ export default function DashboardInv() {
         </div>
       )}
 
+      {/* AVISO DE PURGA AUTOMATICA (con copia de seguridad) */}
+      <AvisoPurga />
+
       {/* INDICADORES */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
 
         {/* VENTAS DEL MES */}
         <div className="flex items-center gap-3 rounded-xl border border-slate-700 bg-[#1E293B] p-5">
@@ -160,7 +166,21 @@ export default function DashboardInv() {
               {cargando ? '...' : formatoDinero(datos.ganancia_estimada)}
             </p>
             <span className="mt-1 block text-xs text-slate-400">
-              Margen estimado: {Number(datos.margen_promedio || 0).toFixed(2)}%
+              Ventas - costos - gastos · Margen: {Number(datos.margen_promedio || 0).toFixed(2)}%
+            </span>
+          </div>
+        </div>
+
+        {/* GASTOS DEL MES */}
+        <div className="flex items-center gap-3 rounded-xl border border-slate-700 bg-[#1E293B] p-5">
+          <Wallet className="text-rose-400" size={26} />
+          <div className="min-w-0">
+            <p className="text-sm text-slate-400">Gastos del Mes</p>
+            <p className="text-2xl font-bold">
+              {cargando ? '...' : formatoDinero(datos.gastos_mes)}
+            </p>
+            <span className="mt-1 block text-xs font-semibold text-rose-300">
+              Gastos vigentes descontados de la ganancia
             </span>
           </div>
         </div>
