@@ -7,7 +7,6 @@ from flask_cors import CORS
 from config import obtener_clave_secreta
 from database.database import init_db, ULTIMO_ESTADO
 from routes.productos import productos_bp
-from routes.proveedores import proveedores_bp
 from routes.ventas import ventas_bp
 from routes.kardex import kardex_bp
 from routes.usuarios import usuarios_bp
@@ -32,7 +31,6 @@ CORS(app, origins=['http://localhost:5173'], supports_credentials=True)
 init_db()
 
 app.register_blueprint(productos_bp)
-app.register_blueprint(proveedores_bp)
 app.register_blueprint(ventas_bp)
 app.register_blueprint(kardex_bp)
 app.register_blueprint(usuarios_bp)

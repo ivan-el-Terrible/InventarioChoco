@@ -49,14 +49,14 @@ CONSULTA_PRODUCTOS = """
 @productos_bp.route("/tiendas", methods=["GET"])
 @roles_permitidos("admin")
 def obtener_tiendas():
-    """Lista las tiendas para el selector de la lista de productos."""
+    """Lista las tiendas para los selectores (la principal va primero)."""
     db = get_db()
     try:
         filas = db.execute("""
             SELECT id, nombre, direccion, activo
             FROM tiendas
             WHERE activo = 1
-            ORDER BY nombre
+            ORDER BY id
         """).fetchall()
         return jsonify([dict(f) for f in filas])
     finally:
@@ -193,6 +193,100 @@ def obtener_productos():
         db.close()
 
 
+@productos_bp.route("/productos/exportar", methods=["GET"])
+@roles_permitidos("admin")
+def exportar_productos():
+    """Lista completa de productos con el stock de TODAS las tiendas.
+
+    El boton de Excel del frontend hace UN solo pedido (antes hacia uno por
+    tienda); cada ida y vuelta a Turso cuesta ~200 ms.
+    Los precios salen de la tienda elegida (?id_tienda=, por defecto la
+    principal) y el stock viene por tienda en `stock_por_tienda`.
+    """
+    db = get_db()
+    try:
+        id_tienda_precios = tienda_param(
+            db,
+            session.get("rol"),
+            session.get("id_tienda"),
+            request.args.get("id_tienda", type=int)
+        )
+
+        tiendas = db.execute("""
+            SELECT id, nombre
+            FROM tiendas
+            WHERE activo = 1
+            ORDER BY id
+        """).fetchall()
+
+        filas = db.execute("""
+            SELECT
+                p.id,
+                p.cod_origen,
+                p.codigo,
+                p.nombre,
+                p.categoria,
+                p.descripcion,
+                p.marca,
+                p.unidad,
+                p.proveedor,
+                p.telefono_proveedor,
+                i.id_tienda AS id_tienda_stock,
+                i.stock,
+                ip.precio_compra,
+                ip.costo_promedio,
+                ip.precio_venta
+            FROM productos p
+            LEFT JOIN inventario i
+                ON i.id_producto = p.id
+            LEFT JOIN inventario ip
+                ON ip.id_producto = p.id AND ip.id_tienda = ?
+            ORDER BY p.id
+        """, (id_tienda_precios,)).fetchall()
+
+        productos = []
+        por_id = {}
+        for fila in filas:
+            datos = por_id.get(fila["id"])
+            if datos is None:
+                datos = {
+                    "id": fila["id"],
+                    "cod_origen": fila["cod_origen"],
+                    "codigo": fila["codigo"],
+                    "nombre": fila["nombre"],
+                    "categoria": fila["categoria"],
+                    "descripcion": fila["descripcion"],
+                    "marca": fila["marca"],
+                    "unidad": fila["unidad"],
+                    "proveedor": fila["proveedor"],
+                    "telefono_proveedor": fila["telefono_proveedor"],
+                    "precio_compra": 0.0,
+                    "costo_promedio": 0.0,
+                    "precio_venta": 0.0,
+                    "stock_por_tienda": {}
+                }
+                por_id[fila["id"]] = datos
+                productos.append(datos)
+
+            if fila["id_tienda_stock"] is not None:
+                datos["stock_por_tienda"][str(fila["id_tienda_stock"])] = int(
+                    fila["stock"] or 0
+                )
+            if fila["precio_venta"] is not None:
+                datos["precio_compra"] = float(fila["precio_compra"] or 0)
+                datos["costo_promedio"] = float(fila["costo_promedio"] or 0)
+                datos["precio_venta"] = float(fila["precio_venta"] or 0)
+
+        return jsonify({
+            "tiendas": [dict(t) for t in tiendas],
+            "id_tienda_precios": id_tienda_precios,
+            "productos": productos
+        }), 200
+
+    finally:
+        db.close()
+
+
 
 
 """ahora agregaremos los productos """
@@ -267,6 +361,13 @@ def crear_producto():
         ))
 
         producto_id = cursor.lastrowid
+
+        # Si el precio de venta vino en 0, se hereda el precio de venta de la
+        # tienda principal de un producto existente con el mismo código.
+        if precio_venta <= 0:
+            precio_venta = _precio_venta_producto_existente(
+                db, cod_origen, data.get("codigo"), id_excluir=producto_id
+            )
 
         # Stock y precios iniciales de la tienda actual.
         db.execute("""
@@ -405,30 +506,55 @@ def registrar_entrada(id_producto):
                 + (cantidad * costo_unitario)
             ) / stock_nuevo
 
+        # El precio de venta se hereda de la tienda principal (o de otra
+        # tienda que ya lo tenga) en vez de quedar en 0.
+        precio_venta = _precio_venta_referencia(db, id_producto, id_tienda)
+
         if inventario is None:
             db.execute("""
                 INSERT INTO inventario
                     (id_tienda, id_producto, stock, precio_compra,
                      costo_promedio, precio_venta)
-                VALUES (?, ?, ?, ?, ?, 0)
+                VALUES (?, ?, ?, ?, ?, ?)
             """, (id_tienda, id_producto, stock_nuevo, costo_unitario,
-                  costo_promedio_nuevo))
+                  costo_promedio_nuevo, precio_venta))
         else:
-            # Actualizar las existencias y el último costo de compra
-            db.execute("""
-                UPDATE inventario
-                SET stock = ?,
-                    precio_compra = ?,
-                    costo_promedio = ?,
-                    actualizado_en = CURRENT_TIMESTAMP
-                WHERE id_tienda = ? AND id_producto = ?
-            """, (
-                stock_nuevo,
-                costo_unitario,
-                costo_promedio_nuevo,
-                id_tienda,
-                id_producto
-            ))
+            # Actualizar las existencias y el último costo de compra.
+            # Si el precio de venta sigue en 0, se completa con el de la
+            # tienda principal para que nunca aparezca en 0.
+            precio_actual = float(inventario["precio_venta"] or 0)
+            if precio_actual <= 0 and precio_venta > 0:
+                db.execute("""
+                    UPDATE inventario
+                    SET stock = ?,
+                        precio_compra = ?,
+                        costo_promedio = ?,
+                        precio_venta = ?,
+                        actualizado_en = CURRENT_TIMESTAMP
+                    WHERE id_tienda = ? AND id_producto = ?
+                """, (
+                    stock_nuevo,
+                    costo_unitario,
+                    costo_promedio_nuevo,
+                    precio_venta,
+                    id_tienda,
+                    id_producto
+                ))
+            else:
+                db.execute("""
+                    UPDATE inventario
+                    SET stock = ?,
+                        precio_compra = ?,
+                        costo_promedio = ?,
+                        actualizado_en = CURRENT_TIMESTAMP
+                    WHERE id_tienda = ? AND id_producto = ?
+                """, (
+                    stock_nuevo,
+                    costo_unitario,
+                    costo_promedio_nuevo,
+                    id_tienda,
+                    id_producto
+                ))
 
         # Registrar movimiento de entrada en Kardex
         cursor = db.execute("""
@@ -579,6 +705,81 @@ def actualizar_precio_venta(id_producto):
 
     finally:
         db.close()
+
+
+def _precio_venta_referencia(db, id_producto, id_tienda):
+    """Precio de venta de la tienda principal (o de otra tienda que ya lo tenga).
+
+    Se usa cuando el producto entra por primera vez a una tienda: en vez de
+    guardar 0 se hereda el precio que ya está usando la tienda principal.
+    """
+    principal = db.execute(
+        "SELECT id FROM tiendas WHERE activo = 1 ORDER BY id LIMIT 1"
+    ).fetchone()
+
+    candidatos = []
+    if principal is not None:
+        candidatos.append(int(principal["id"]))
+    candidatos += [
+        int(f["id_tienda"]) for f in db.execute(
+            """
+            SELECT DISTINCT id_tienda
+            FROM inventario
+            WHERE id_producto = ? AND COALESCE(precio_venta, 0) > 0
+            ORDER BY id_tienda
+            """,
+            (id_producto,)
+        ).fetchall()
+    ]
+
+    for id_ref in candidatos:
+        if id_ref == id_tienda:
+            continue
+        fila = db.execute(
+            "SELECT precio_venta FROM inventario "
+            "WHERE id_producto = ? AND id_tienda = ?",
+            (id_producto, id_ref)
+        ).fetchone()
+        if fila is not None and float(fila["precio_venta"] or 0) > 0:
+            return float(fila["precio_venta"])
+    return 0.0
+
+
+def _precio_venta_producto_existente(db, cod_origen, codigo, id_excluir=None):
+    """Precio de venta de la tienda principal para un producto ya existente.
+
+    Busca por código original o código SKU (distinto de `id_excluir`) y
+    devuelve su precio de venta en la primera tienda activa.
+    """
+    condiciones = []
+    parametros = []
+    if cod_origen:
+        condiciones.append("p.cod_origen = ?")
+        parametros.append(cod_origen)
+    if codigo:
+        condiciones.append("p.codigo = ?")
+        parametros.append(codigo)
+    if not condiciones:
+        return 0.0
+
+    # La coincidencia va entre parentesis; excluir el producto recien creado
+    # se hace con AND (nunca con OR, o coincidiria con todos).
+    coincidencia = f"({' OR '.join(condiciones)})"
+    if id_excluir is not None:
+        coincidencia += " AND p.id <> ?"
+        parametros.append(id_excluir)
+
+    fila = db.execute(f"""
+        SELECT i.precio_venta
+        FROM inventario i
+        JOIN productos p ON p.id = i.id_producto
+        JOIN tiendas t ON t.id = i.id_tienda AND t.activo = 1
+        WHERE {coincidencia}
+          AND COALESCE(i.precio_venta, 0) > 0
+        ORDER BY t.id
+        LIMIT 1
+    """, parametros).fetchone()
+    return float(fila["precio_venta"]) if fila else 0.0
 
 
 def _texto(valor):

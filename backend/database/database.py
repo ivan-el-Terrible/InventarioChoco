@@ -1,9 +1,13 @@
-"""Conexion remota Turso/libSQL para InventarioChoco.
+"""Conexion a la base de datos de InventarioChoco.
 
-Lee las credenciales de backend/.env (o del entorno) y verifica/crea
-el esquema de schema.sql en la base remota.
+MODO NUBE: si backend/.env trae credenciales de Turso, se usa la base remota.
+MODO LOCAL: si no hay credenciales en la nube (por ejemplo un portable sin
+configurar), se usa backend/database/inventario.db con la MISMA estructura
+que la nube, definida en schema.sql.
 """
 import os
+import sqlite3
+import threading
 from pathlib import Path
 
 import libsql
@@ -11,6 +15,7 @@ import libsql
 BASE_DIR = Path(__file__).resolve().parent     # backend/database
 ARCHIVO_ENV = BASE_DIR.parent / '.env'         # backend/.env
 SCHEMA_PATH = BASE_DIR / 'schema.sql'
+ARCHIVO_LOCAL = BASE_DIR / 'inventario.db'     # modo local (sin nube)
 
 
 def _cargar_env():
@@ -130,7 +135,6 @@ TABLAS_REQUERIDAS = {
                   'telefono_proveedor', 'activo', 'fecha'),
     'inventario': ('id', 'id_tienda', 'id_producto', 'stock', 'precio_compra',
                    'costo_promedio', 'precio_venta'),
-    'proveedores': ('id', 'nomEmpresa', 'telefono', 'email'),
     'ventas': ('id', 'id_tienda', 'id_vendedor', 'nombre_cliente', 'tipo',
                'total', 'forma_pago', 'con_factura', 'estado', 'fecha'),
     'detalle_ventas': ('id', 'id_venta', 'id_producto', 'cantidad',
@@ -155,22 +159,124 @@ def url_turso():
     return os.environ.get('TURSO_DATABASE_URL', '').strip()
 
 
-def get_db():
+def credenciales_nube():
+    """(url, token) de Turso si estan completas; None si no hay nube configurada."""
     url = url_turso()
     token = os.environ.get('TURSO_AUTH_TOKEN', '').strip()
     if not url or not token or 'PEGA_AQUI' in (url + token).upper():
-        raise RuntimeError(
-            'Faltan credenciales de Turso: edita backend/.env y pega tu '
-            'TURSO_DATABASE_URL y TURSO_AUTH_TOKEN.'
-        )
+        return None
     if not url.startswith(('libsql://', 'https://')):
         raise RuntimeError('TURSO_DATABASE_URL debe comenzar con libsql:// o https://')
-    conn = libsql.connect(database=url, auth_token=token)
-    try:
+    return url, token
+
+
+def en_nube():
+    """True si hay credenciales de Turso; False = modo local (SQLite)."""
+    return credenciales_nube() is not None
+
+
+class ConexionNube:
+    """Conexion a Turso reutilizable entre peticiones del MISMO hilo.
+
+    Cada `libsql.connect` a la nube cuesta ~0.5 s (DNS + TLS + sesion) y cada
+    consulta ~0.2 s de ida y vuelta. Guardar la conexion por hilo evita
+    reconectarse en cada peticion. Si la sesion caduca, se reconecta una vez
+    y se reintenta la consulta.
+    """
+
+    def __init__(self, url, token):
+        self._url = url
+        self._token = token
+
+    def _conexion(self):
+        conn = getattr(_hilos, 'conexion_nube', None)
+        if conn is None:
+            conn = libsql.connect(database=self._url, auth_token=self._token)
+            try:
+                # Solo al conectar: es un round trip mas a Turso.
+                conn.execute('PRAGMA foreign_keys = ON')
+            except Exception:
+                pass  # Turso puede rechazar el PRAGMA; no bloquea.
+            _hilos.conexion_nube = conn
+        return conn
+
+    def _reconectar(self):
+        vieja = getattr(_hilos, 'conexion_nube', None)
+        if vieja is not None:
+            try:
+                vieja.close()
+            except Exception:
+                pass
+        _hilos.conexion_nube = None
+        return self._conexion()
+
+    def _llamar(self, metodo, *args):
+        try:
+            return getattr(self._conexion(), metodo)(*args)
+        except Exception as error:
+            if not _es_error_deconexion(error):
+                raise
+            # La sesion pudo caducar: se reconecta y se reintenta una vez.
+            return getattr(self._reconectar(), metodo)(*args)
+
+    def execute(self, sql, parametros=()):
+        return CursorCompatible(self._llamar('execute', sql, parametros))
+
+    def executemany(self, sql, filas):
+        return CursorCompatible(self._llamar('executemany', sql, filas))
+
+    def cursor(self):
+        return CursorCompatible(self._conexion().cursor())
+
+    def commit(self):
+        self._llamar('commit')
+
+    def rollback(self):
+        self._llamar('rollback')
+
+    def close(self):
+        """No cierra: la conexion se reutiliza en la siguiente peticion."""
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, tipo, valor, traza):
+        if tipo:
+            self.rollback()
+        else:
+            self.commit()
+        self.close()
+
+
+_hilos = threading.local()
+
+
+def _es_error_deconexion(error):
+    """True si el error parece de red/sesion (no un error de SQL)."""
+    texto = str(error).lower()
+    if 'sqlite' in texto or 'constraint' in texto or 'input error' in texto:
+        return False
+    marcas = (
+        'dns error', 'http error', 'timeout', 'timed out', 'connection',
+        'connect', 'broken pipe', 'socket', 'unreachable', 'reset by peer',
+        'stream error',
+    )
+    return any(marca in texto for marca in marcas)
+
+
+def get_db():
+    """Conexion a Turso (nube) o a backend/database/inventario.db (modo local)."""
+    cred = credenciales_nube()
+    if cred is None:
+        # Modo local: el portable o un equipo sin .env usan SQLite con la
+        # MISMA estructura que la nube (schema.sql).
+        conn = sqlite3.connect(str(ARCHIVO_LOCAL))
         conn.execute('PRAGMA foreign_keys = ON')
-    except Exception:
-        pass  # Turso puede rechazar el PRAGMA; no bloquea la conexion.
-    return ConexionCompatible(conn)
+        return ConexionCompatible(conn)
+
+    url, token = cred
+    return ConexionNube(url, token)
 
 
 def tienda_actual(db, id_tienda_usuario=None):
@@ -223,7 +329,10 @@ def _crear_esquema(conn):
 
 
 def init_db():
-    """Verifica el esquema remoto y crea con schema.sql las tablas que falten."""
+    """Verifica el esquema y crea con schema.sql las tablas que falten.
+
+    Funciona igual en nube (Turso) y en modo local (SQLite).
+    """
     conn = get_db()
     try:
         faltantes = set(TABLAS_REQUERIDAS) - _tablas(conn)
@@ -244,23 +353,32 @@ def init_db():
                 )
         if incompletas:
             raise RuntimeError(
-                'La base en Turso usa un esquema distinto al del proyecto. '
+                'La base de datos usa un esquema distinto al del proyecto. '
                 'Revisa backend/database/schema.sql. Tablas afectadas: '
                 + '; '.join(incompletas)
             )
 
         nombres = sorted(set(TABLAS_REQUERIDAS) & _tablas(conn))
+        if en_nube():
+            base = url_turso()
+            mensaje = (
+                f'Conectado a Turso: {base} '
+                f'({len(nombres)} tablas verificadas)'
+            )
+        else:
+            base = str(ARCHIVO_LOCAL)
+            mensaje = (
+                f'MODO LOCAL (sin credenciales en la nube): {base} '
+                f'({len(nombres)} tablas verificadas)'
+            )
         ULTIMO_ESTADO.update({
             'estado': 'conectada',
-            'base': url_turso(),
+            'base': base,
             'tablas': nombres,
-            'mensaje': (
-                f'Conectado a Turso: {url_turso()} '
-                f'({len(nombres)} tablas verificadas)'
-            ),
+            'mensaje': mensaje,
         })
         print('=' * 62, flush=True)
-        print(f'  BASE DE DATOS EN LA NUBE CONECTADA: {url_turso()}', flush=True)
+        print(f'  BASE DE DATOS: {base}', flush=True)
         print(f'  Tablas verificadas ({len(nombres)}): ' + ', '.join(nombres),
               flush=True)
         print('=' * 62, flush=True)

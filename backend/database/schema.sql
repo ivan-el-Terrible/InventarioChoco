@@ -1,6 +1,10 @@
--- Esquema REAL de la base de datos en la nube (Turso).
+-- Esquema de la base de datos: MISMA estructura que la nube (Turso).
 -- Copiado desde sqlite_master el dia que se verifico la conexion.
--- Lo usa database.py si falta alguna tabla. No usar punto y coma dentro de comentarios.
+-- Lo usa database.py en la nube (si falta alguna tabla) y tambien en MODO LOCAL
+-- para crear backend/database/inventario.db cuando no hay credenciales en la nube.
+-- OJO: no usar punto y coma dentro de comentarios (database.py divide por eso).
+-- NO existe tabla proveedores: el proveedor es una columna de productos
+-- (proveedor, telefono_proveedor).
 
 CREATE TABLE IF NOT EXISTS tiendas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,6 +40,13 @@ CREATE TABLE IF NOT EXISTS productos (
     fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Indices reales de Turso (unico de codigo y busqueda por cod_origen)
+CREATE INDEX IF NOT EXISTS ux_productos_codigo
+    ON productos(codigo) WHERE codigo IS NOT NULL AND codigo <> '';
+
+CREATE INDEX IF NOT EXISTS ix_productos_cod_origen
+    ON productos(cod_origen);
+
 CREATE TABLE IF NOT EXISTS inventario (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     id_tienda INTEGER NOT NULL REFERENCES tiendas(id),
@@ -46,14 +57,6 @@ CREATE TABLE IF NOT EXISTS inventario (
     precio_venta NUMERIC NOT NULL DEFAULT 0 CHECK (precio_venta >= 0),
     actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (id_tienda, id_producto)
-);
-
-CREATE TABLE IF NOT EXISTS proveedores (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nomEmpresa TEXT NOT NULL,
-    telefono TEXT,
-    email TEXT,
-    fecha_creacion TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS ventas (

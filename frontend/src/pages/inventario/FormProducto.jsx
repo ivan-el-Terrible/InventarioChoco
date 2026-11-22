@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { X, Save } from 'lucide-react';
 
-export default function FormProducto({ onClose, onGuardar }) {//tabla del formulario 
+export default function FormProducto({ idTienda, onClose, onGuardar }) {//tabla del formulario 
   const [formData, setFormData] = useState({
     codOriginal: '',
     codigo: '',
@@ -61,7 +61,8 @@ const [error, setError] = useState('');
       descripcion: '',
       stock,
       precio_compra: costo,
-      precio_venta: precio
+      precio_venta: precio,
+      ...(idTienda ? { id_tienda: idTienda } : {})
     };
 
     setGuardando(true);

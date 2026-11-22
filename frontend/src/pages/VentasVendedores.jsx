@@ -169,7 +169,6 @@ export default function VentasVendedores() {
         <SelectorTienda
           valor={tiendaSeleccionada}
           onChange={setTiendaSeleccionada}
-          defectoLabel="Mi tienda (por defecto)"
         />
       </div>
 

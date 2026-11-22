@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, Search, AlertTriangle, Eye, Edit, Package, DollarSign, Store, X, Pencil } from 'lucide-react';
+import { Plus, Search, AlertTriangle, Eye, Edit, Package, DollarSign, Store, X, Pencil, Printer, FileSpreadsheet } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import FormProducto from './FormProducto';
 import Kardex from './Kardex';
 import useAutoRefetch from '../../hooks/useAutoRefetch';
+import { imprimirDocumento, escapar } from '../../utils/impresion';
 
 export default function ListaProductos({ usuario }) {
 
@@ -80,6 +82,7 @@ export default function ListaProductos({ usuario }) {
   }, [cargarProductos]);
 
   // El administrador elige la tienda de la que quiere ver los productos.
+  // Solo se listan las tiendas de la BD: al cargar, queda la principal.
   useEffect(() => {
     if (!esAdmin) return;
     let activo = true;
@@ -88,7 +91,13 @@ export default function ListaProductos({ usuario }) {
         const respuesta = await fetch('/tiendas', { credentials: 'include' });
         if (!respuesta.ok) return;
         const datos = await respuesta.json();
-        if (activo && Array.isArray(datos)) setTiendas(datos);
+        if (activo && Array.isArray(datos)) {
+          setTiendas(datos);
+          setTiendaSeleccionada((actual) => {
+            const visible = actual && datos.some((t) => String(t.id) === String(actual));
+            return visible ? actual : (datos.length ? String(datos[0].id) : actual);
+          });
+        }
       } catch {
         /* sin tiendas: se queda con la tienda por defecto de la sesión */
       }
@@ -207,6 +216,136 @@ export default function ListaProductos({ usuario }) {
     p.proveedor.toLowerCase().includes(textoBusqueda)
   ));
 
+  // Nombre de la tienda que se está viendo (para impresión y Excel).
+  const nombreTiendaActual = () => {
+    if (!esAdmin) return 'Mi tienda';
+    const t = tiendas.find((x) => String(x.id) === String(tiendaSeleccionada));
+    return t ? t.nombre : 'Mi tienda (por defecto)';
+  };
+
+  // Imprime la lista de productos (con todos los detalles) de la tienda actual.
+  const imprimirLista = () => {
+    const filas = productosFiltrados.map((p) => `
+      <tr>
+        <td>${escapar(p.codOrigen || '—')}</td>
+        <td>${escapar(p.codigo || '—')}</td>
+        <td>${escapar(p.nombre)}${p.descripcion ? `<br><small>${escapar(p.descripcion)}</small>` : ''}</td>
+        <td>${escapar(p.categoria || '—')}</td>
+        <td>${escapar(p.marca || '—')}</td>
+        <td>${escapar(p.unidad || '—')}</td>
+        <td>${escapar(p.proveedor || '—')}${p.telefonoProveedor ? `<br><small>${escapar(p.telefonoProveedor)}</small>` : ''}</td>
+        <td class="num">$${(p.costo ?? 0).toFixed(2)}</td>
+        <td class="num">$${(p.costoPromedio ?? 0).toFixed(2)}</td>
+        <td class="num">$${p.precio.toFixed(2)}</td>
+        <td class="ctr">${p.stock}</td>
+      </tr>`).join('');
+
+    const totalValor = productosFiltrados
+      .reduce((acc, p) => acc + ((p.costoPromedio ?? 0) * p.stock), 0);
+
+    imprimirDocumento({
+      titulo: 'Lista de productos',
+      subtitulo: `Tienda: ${nombreTiendaActual()}`,
+      encabezado: `Fecha de impresión: ${new Date().toLocaleString('es-BO')} · ${productosFiltrados.length} producto(s)`,
+      tabla: `
+        <table>
+          <thead>
+            <tr>
+              <th>Cod. Origen</th>
+              <th>Código</th>
+              <th>Producto</th>
+              <th>Categoría</th>
+              <th>Marca</th>
+              <th>Unidad</th>
+              <th>Proveedor</th>
+              <th class="num">P. Compra</th>
+              <th class="num">C. Promedio</th>
+              <th class="num">P. Venta</th>
+              <th class="ctr">Stock</th>
+            </tr>
+          </thead>
+          <tbody>${filas}</tbody>
+          <tfoot>
+            <tr class="total">
+              <td colspan="7">Totales</td>
+              <td class="num">—</td>
+              <td class="num">$${totalValor.toFixed(2)}</td>
+              <td class="num">—</td>
+              <td class="ctr">${productosFiltrados.reduce((acc, p) => acc + p.stock, 0)}</td>
+            </tr>
+          </tfoot>
+        </table>`,
+      pie: 'InventarioChoco · Documento generado desde el módulo de inventario.'
+    });
+  };
+
+  // Exporta a Excel la lista completa de productos con el stock por tienda.
+  const exportarExcel = async () => {
+    try {
+      let listaTiendas = tiendas;
+      if (!listaTiendas.length) {
+        const respuesta = await fetch('/tiendas', { credentials: 'include' });
+        if (respuesta.ok) listaTiendas = await respuesta.json();
+      }
+
+      // Stock y precios de cada tienda activa.
+      const porTienda = [];
+      if (listaTiendas.length) {
+        const respuestas = await Promise.all(listaTiendas.map((t) =>
+          fetch(`/productos?id_tienda=${encodeURIComponent(t.id)}`, { credentials: 'include' })
+            .then((r) => (r.ok ? r.json() : []))
+            .catch(() => [])
+        ));
+        listaTiendas.forEach((t, i) => porTienda.push({ nombre: t.nombre, productos: respuestas[i] }));
+      }
+
+      const stockDe = (idProducto, lista) => {
+        const fila = (lista || []).find((x) => Number(x.id) === Number(idProducto));
+        return fila ? Number(fila.stock ?? 0) : 0;
+      };
+
+      const filas = productos.map((p) => {
+        const fila = {
+          'Cod. Origen': p.codOrigen || '',
+          'Código': p.codigo || '',
+          'Producto': p.nombre,
+          'Descripción': p.descripcion || '',
+          'Categoría': p.categoria || '',
+          'Marca': p.marca || '',
+          'Unidad': p.unidad || '',
+          'Proveedor': p.proveedor || '',
+          'Tel. Proveedor': p.telefonoProveedor || '',
+          'P. Compra ($)': Number((p.costo ?? 0).toFixed(2)),
+          'C. Promedio ($)': Number((p.costoPromedio ?? 0).toFixed(2)),
+          'P. Venta ($)': Number(p.precio.toFixed(2))
+        };
+        let total = 0;
+        porTienda.forEach((t) => {
+          const stock = stockDe(p.id, t.productos);
+          total += stock;
+          fila[`Stock - ${t.nombre}`] = stock;
+        });
+        if (!porTienda.length) fila['Stock'] = p.stock;
+        fila['Stock Total'] = porTienda.length ? total : p.stock;
+        return fila;
+      });
+
+      const hoja = XLSX.utils.json_to_sheet(filas);
+      hoja['!cols'] = Object.keys(filas[0] || {}).map((k) => ({
+        wch: Math.max(12, Math.min(32, k.length + 6))
+      }));
+      const libro = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(libro, hoja, 'Productos');
+
+      const fecha = new Date().toISOString().slice(0, 10);
+      const nombre = `lista_productos_${nombreTiendaActual().replace(/\s+/g, '_')}_${fecha}.xlsx`;
+      XLSX.writeFile(libro, nombre);
+    } catch (error) {
+      console.error('Error al exportar a Excel:', error);
+      setErrorProductos('No se pudo exportar la lista a Excel.');
+    }
+  };
+
   return (
     <div className="p-6 bg-[#0F172A] min-h-screen text-slate-100">
       {/* Encabezado */}
@@ -230,7 +369,7 @@ export default function ListaProductos({ usuario }) {
                 onChange={(e) => setTiendaSeleccionada(e.target.value)}
                 className="rounded-lg border border-slate-600 bg-[#1E293B] px-4 py-2 text-white"
               >
-                <option value="">Mi tienda (por defecto)</option>
+                {!tiendas.length && <option value="">Tiendas...</option>}
                 {tiendas.map((t) => (
                   <option key={t.id} value={t.id} title={t.direccion || ''}>
                     {t.nombre}
@@ -260,13 +399,32 @@ export default function ListaProductos({ usuario }) {
             </div>
           )}
         {esAdmin && (
-          <button
-            type="button"
-            onClick={() => setModalAbierto(true)}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-md"
-          >
-            <Plus size={18} /> Agregar nuevo
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={imprimirLista}
+              disabled={productosFiltrados.length === 0}
+              title="Imprimir la lista de productos de la tienda seleccionada"
+              className="flex items-center gap-2 bg-slate-600 hover:bg-slate-500 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-md disabled:opacity-50"
+            >
+              <Printer size={17} /> Imprimir lista
+            </button>
+            <button
+              type="button"
+              onClick={exportarExcel}
+              title="Exportar a Excel la lista completa con el stock por tienda"
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-md"
+            >
+              <FileSpreadsheet size={17} /> Excel
+            </button>
+            <button
+              type="button"
+              onClick={() => setModalAbierto(true)}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-md"
+            >
+              <Plus size={18} /> Agregar nuevo
+            </button>
+          </div>
         )}
         </div>
       </div>
@@ -584,6 +742,7 @@ export default function ListaProductos({ usuario }) {
 
       {esAdmin && modalAbierto && (
         <FormProducto
+          idTienda={tiendaSeleccionada}
           onClose={() => setModalAbierto(false)}
           onGuardar={guardarProducto}
         />

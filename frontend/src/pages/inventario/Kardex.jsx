@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import {
   X, ArrowUpRight, ArrowDownLeft, FileText,
-  Search, ClipboardList, Package, RotateCcw
+  Search, ClipboardList, Package, RotateCcw, Printer
 } from 'lucide-react';
 import SelectorTienda from '../../components/SelectorTienda';
+import { imprimirDocumento, escapar } from '../../utils/impresion';
 
 const API = '';
 
@@ -95,10 +96,27 @@ function KardexGeneral() {
   const [fechaInicio, setFechaInicio] = useState('');
   const [fechaFin, setFechaFin] = useState('');
   const [tiendaSeleccionada, setTiendaSeleccionada] = useState('');
+  const [tiendas, setTiendas] = useState([]);
   const urlKardex = tiendaSeleccionada
     ? `${API}/kardex?id_tienda=${encodeURIComponent(tiendaSeleccionada)}`
     : `${API}/kardex`;
   const { movimientos, cargando, error } = useMovimientos(urlKardex);
+
+  // Nombres de tiendas para mostrar en la impresión (solo admin).
+  useEffect(() => {
+    let activo = true;
+    (async () => {
+      try {
+        const respuesta = await fetch('/tiendas', { credentials: 'include' });
+        if (!respuesta.ok) return;
+        const datos = await respuesta.json();
+        if (activo && Array.isArray(datos)) setTiendas(datos);
+      } catch {
+        /* sin tiendas: se usa la etiqueta por defecto */
+      }
+    })();
+    return () => { activo = false; };
+  }, []);
 
   const movimientosFiltrados = movimientos.filter(m => {
     const texto = busqueda.trim().toLowerCase();
@@ -119,6 +137,61 @@ function KardexGeneral() {
     setBusqueda(''); setTipoFiltro('Todos'); setFechaInicio(''); setFechaFin('');
   };
 
+  // Imprime el Kardex filtrado (solo admin: la ruta es de administrador).
+  const imprimirKardex = () => {
+    const nombreTienda = tiendaSeleccionada
+      ? (tiendas.find((t) => String(t.id) === String(tiendaSeleccionada))?.nombre || `Tienda #${tiendaSeleccionada}`)
+      : 'Mi tienda (por defecto)';
+
+    const filtros = [
+      `Tienda: ${nombreTienda}`,
+      busqueda.trim() ? `Búsqueda: "${busqueda.trim()}"` : null,
+      tipoFiltro !== 'Todos' ? `Tipo: ${tipoFiltro}` : null,
+      fechaInicio || fechaFin
+        ? `Período: ${fechaInicio || '...'} a ${fechaFin || '...'}`
+        : null
+    ].filter(Boolean).join(' · ');
+
+    const filas = movimientosFiltrados.map((m) => `
+      <tr>
+        <td>${escapar(m.fecha)}</td>
+        <td>${escapar(m.codOrigen || '—')}</td>
+        <td>${escapar(m.codigo || '—')}</td>
+        <td>${escapar(m.producto)}</td>
+        <td class="ctr">${escapar(m.tipo)}</td>
+        <td>${escapar(m.detalle)}</td>
+        <td class="num">${m.tipo === 'Entrada' ? '+' : m.tipo === 'Salida' ? '-' : ''}${m.cantidad}</td>
+        <td class="num">${m.precioCompra == null ? '—' : `Bs ${m.precioCompra.toFixed(2)}`}</td>
+        <td class="num">${m.saldoAnterior}</td>
+        <td class="num">${m.saldoNuevo}</td>
+      </tr>`).join('');
+
+    imprimirDocumento({
+      titulo: 'Kardex general',
+      subtitulo: filtros,
+      encabezado: `Fecha de impresión: ${new Date().toLocaleString('es-BO')} · ${movimientosFiltrados.length} movimiento(s) · Entradas: ${entradas} · Salidas: ${salidas}`,
+      tabla: `
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Cod. Origen</th>
+              <th>Código</th>
+              <th>Producto</th>
+              <th class="ctr">Movimiento</th>
+              <th>Documento</th>
+              <th class="num">Cantidad</th>
+              <th class="num">P. Compra</th>
+              <th class="num">S. Anterior</th>
+              <th class="num">S. Nuevo</th>
+            </tr>
+          </thead>
+          <tbody>${filas}</tbody>
+        </table>`,
+      pie: 'InventarioChoco · Método de valoración: Costo Promedio Ponderado.'
+    });
+  };
+
   return (
     <div className="p-6 space-y-6 bg-[#0F172A] min-h-screen text-slate-100">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -130,10 +203,21 @@ function KardexGeneral() {
           </div>
         </div>
 
-        <SelectorTienda
-          valor={tiendaSeleccionada}
-          onChange={setTiendaSeleccionada}
-        />
+        <div className="flex flex-wrap items-center gap-3">
+          <SelectorTienda
+            valor={tiendaSeleccionada}
+            onChange={setTiendaSeleccionada}
+          />
+          <button
+            type="button"
+            onClick={imprimirKardex}
+            disabled={movimientosFiltrados.length === 0}
+            title="Imprimir el Kardex filtrado"
+            className="flex items-center gap-2 bg-slate-600 hover:bg-slate-500 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-md disabled:opacity-50"
+          >
+            <Printer size={17} /> Imprimir Kardex
+          </button>
+        </div>
       </div>
 
       {error && (
