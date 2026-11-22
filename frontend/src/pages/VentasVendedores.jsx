@@ -71,7 +71,7 @@ export default function VentasVendedores() {
   }, []);
 
   // Las ventas nuevas aparecen solas sin recargar la página.
-  useAutoRefetch(cargarDatos, 15000);
+  useAutoRefetch(cargarDatos, 30000);
 
   const vendedores = usuarios.filter((u) => u.rol === 'vendedor' || u.rol === 'admin');
 
@@ -83,10 +83,16 @@ export default function VentasVendedores() {
     return lista;
   }, [ventas, vendedor]);
 
+  // Total neto: las devoluciones se descuentan de lo vendido.
   const total = ventasFiltradas.reduce(
-    (acumulado, v) => acumulado + Number(v.total || 0),
+    (acumulado, v) => acumulado + (v.tipo === 'devolucion'
+      ? -Number(v.total || 0)
+      : Number(v.total || 0)),
     0
   );
+  const cantidadDevoluciones = ventasFiltradas.filter(
+    (v) => v.tipo === 'devolucion'
+  ).length;
 
   const nombreVendedor = (id) =>
     usuarios.find((u) => u.id === id)?.nombre || 'Sin asignar';
@@ -108,26 +114,28 @@ export default function VentasVendedores() {
   const imprimirVentas = () => {
     const filas = ventasFiltradas.map((v) => `
       <tr>
-        <td>#${escapar(v.id)}</td>
+        <td>#${escapar(v.id)}${v.tipo === 'devolucion' ? ' · DEVOLUCIÓN' : ''}</td>
         <td>${escapar(v.fecha || '—')}</td>
+        <td>${escapar(v.tipo === 'devolucion' ? 'DEVOLUCIÓN' : 'VENTA')}</td>
         <td>${escapar(nombreVendedor(v.id_vendedor))}</td>
         <td>${escapar(v.nombre_cliente || 'Consumidor final')}</td>
         <td>${escapar(v.tienda || '—')}</td>
         <td>${escapar(v.productos || 'Sin productos')}</td>
         <td class="ctr">${escapar(v.cantidades || '—')}</td>
-        <td class="num">$${Number(v.total || 0).toFixed(2)}</td>
+        <td class="num">${v.tipo === 'devolucion' ? '−' : ''}$${Number(v.total || 0).toFixed(2)}</td>
       </tr>`).join('');
 
     imprimirDocumento({
       titulo: 'Ventas por vendedor',
       subtitulo: `Vendedor: ${escapar(etiquetaVendedor())} · Tienda: ${escapar(nombreTiendaActual())}`,
-      encabezado: `Fecha de impresión: ${new Date().toLocaleString('es-BO')} · ${ventasFiltradas.length} venta(s)`,
+      encabezado: `Fecha de impresión: ${new Date().toLocaleString('es-BO')} · ${ventasFiltradas.length} registro(s) · Devoluciones descontadas del total`,
       tabla: `
         <table>
           <thead>
             <tr>
               <th>N.º venta</th>
               <th>Fecha</th>
+              <th class="ctr">Tipo</th>
               <th>Vendedor</th>
               <th>Cliente</th>
               <th>Tienda</th>
@@ -139,7 +147,7 @@ export default function VentasVendedores() {
           <tbody>${filas}</tbody>
           <tfoot>
             <tr class="total">
-              <td colspan="7">Total vendido</td>
+              <td colspan="8">Total neto (devoluciones descontadas)</td>
               <td class="num">$${total.toFixed(2)}</td>
             </tr>
           </tfoot>
@@ -157,12 +165,15 @@ export default function VentasVendedores() {
       const filas = ventasFiltradas.map((v) => ({
         'N.º Venta': `#${v.id}`,
         'Fecha': v.fecha || '',
+        'Tipo': v.tipo === 'devolucion' ? 'DEVOLUCIÓN' : 'VENTA',
         'Vendedor': nombreVendedor(v.id_vendedor),
         'Cliente': v.nombre_cliente || 'Consumidor final',
         'Tienda': v.tienda || '',
         'Producto(s)': v.productos || '',
         'Cantidades': v.cantidades || '',
-        'Total ($)': Number(Number(v.total || 0).toFixed(2))
+        'Total ($)': v.tipo === 'devolucion'
+          ? -Number(Number(v.total || 0).toFixed(2))
+          : Number(Number(v.total || 0).toFixed(2))
       }));
 
       await generarExcel(
@@ -255,6 +266,11 @@ export default function VentasVendedores() {
           <div>
             <p className="text-sm text-slate-400">Total vendido</p>
             <p className="text-2xl font-bold">${total.toFixed(2)}</p>
+            {cantidadDevoluciones > 0 && (
+              <p className="text-xs font-semibold text-rose-300">
+                {cantidadDevoluciones} devolución(es) descontadas
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -325,7 +341,14 @@ export default function VentasVendedores() {
           <tbody>
             {ventasFiltradas.map((v) => (
               <tr key={v.id} className="border-t border-slate-700">
-                <td className="p-4">#{v.id}</td>
+                <td className="p-4">
+                  #{v.id}
+                  {v.tipo === 'devolucion' && (
+                    <span className="ml-2 rounded-md bg-rose-900 px-2 py-0.5 text-[10px] font-bold text-rose-200">
+                      DEVOLUCIÓN
+                    </span>
+                  )}
+                </td>
                 <td className="p-4">{v.fecha || '—'}</td>
                 <td className="p-4">{nombreVendedor(v.id_vendedor)}</td>
                 <td className="p-4">{v.nombre_cliente || 'Consumidor final'} </td>
@@ -333,8 +356,8 @@ export default function VentasVendedores() {
                 <td className="p-4"> {v.productos || 'Sin productos'} </td>
                 <td className="p-4"> {v.cantidades || '—'}  </td>
 
-                <td className="p-4 text-right font-semibold">
-                  ${Number(v.total || 0).toFixed(2)}
+                <td className={`p-4 text-right font-semibold ${v.tipo === 'devolucion' ? 'text-rose-400' : ''}`}>
+                  {v.tipo === 'devolucion' ? '−' : ''}${Number(v.total || 0).toFixed(2)}
                 </td>
               </tr>
             ))}

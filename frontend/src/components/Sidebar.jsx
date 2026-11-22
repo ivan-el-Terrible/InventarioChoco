@@ -10,7 +10,8 @@ import {
   User,
   Users,
   ReceiptText,
-  Wallet
+  Wallet,
+  Undo2
 } from 'lucide-react';
 
 /*ste componente se encarga de la navegación entre los módulos. Oculta o muestra opciones 
@@ -70,6 +71,20 @@ export default function Sidebar({ usuario = { nombre: 'Iván', rol: 'admin' }, a
           >
             <ShoppingCart size={18} />
             <span>Punto de ventas</span>
+          </NavLink>
+
+          {/* ADMIN Y VENDEDOR: Devoluciones de ventas */}
+          <NavLink
+            to="/devoluciones"
+            onClick={onClose}
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                isActive ? 'bg-blue-600 text-white shadow-md' : 'hover:bg-slate-800 text-slate-400 hover:text-slate-200'
+              }`
+            }
+          >
+            <Undo2 size={18} />
+            <span>Devolución</span>
           </NavLink>
 
 

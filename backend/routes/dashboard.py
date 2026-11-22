@@ -23,8 +23,9 @@ def obtener_dashboard():
         )
 
         # =========================================
-        # 1. VENTAS, COSTOS Y GASTOS DEL MES
-        # (una sola consulta: cada ida y vuelta a Turso cuesta ~200 ms)
+        # 1. VENTAS, COSTOS, DEVOLUCIONES Y GASTOS DEL MES
+        # (una sola consulta: cada ida y vuelta a Turso cuesta ~200 ms.
+        #  Las devoluciones se DESCUENTAN de lo que sumo la venta.)
         # =========================================
         resumen = db.execute("""
             SELECT
@@ -43,7 +44,20 @@ def obtener_dashboard():
                    AND estado = 'completada'
                    AND strftime('%Y-%m', fecha) =
                        strftime('%Y-%m', 'now', 'localtime')
-                ) AS ventas_mes,
+                ) AS ventas_brutas,
+                (SELECT COALESCE(SUM(total), 0)
+                 FROM ventas
+                 WHERE id_tienda = ?
+                   AND tipo = 'devolucion'
+                   AND estado = 'completada'
+                   AND strftime('%Y-%m', fecha) =
+                       strftime('%Y-%m', 'now', 'localtime')
+                   AND EXISTS (
+                       SELECT 1 FROM ventas o
+                       WHERE o.id = ventas.id_venta_origen
+                         AND o.estado = 'completada'
+                   )
+                ) AS devoluciones,
                 (SELECT COALESCE(SUM(d.cantidad * d.costo_unitario), 0)
                  FROM detalle_ventas d
                  INNER JOIN ventas v
@@ -53,7 +67,22 @@ def obtener_dashboard():
                    AND v.estado = 'completada'
                    AND strftime('%Y-%m', v.fecha) =
                        strftime('%Y-%m', 'now', 'localtime')
-                ) AS costo_total,
+                ) AS costo_ventas,
+                (SELECT COALESCE(SUM(d.cantidad * d.costo_unitario), 0)
+                 FROM detalle_ventas d
+                 INNER JOIN ventas v
+                     ON v.id = d.id_venta
+                 WHERE v.id_tienda = ?
+                   AND v.tipo = 'devolucion'
+                   AND v.estado = 'completada'
+                   AND strftime('%Y-%m', v.fecha) =
+                       strftime('%Y-%m', 'now', 'localtime')
+                   AND EXISTS (
+                       SELECT 1 FROM ventas o
+                       WHERE o.id = v.id_venta_origen
+                         AND o.estado = 'completada'
+                   )
+                ) AS costo_devoluciones,
                 (SELECT COALESCE(SUM(monto), 0)
                  FROM gastos
                  WHERE id_tienda = ?
@@ -61,12 +90,17 @@ def obtener_dashboard():
                    AND strftime('%Y-%m', fecha) =
                        strftime('%Y-%m', 'now', 'localtime')
                 ) AS gastos_mes
-        """, (id_tienda, id_tienda, id_tienda, id_tienda)).fetchone()
+        """, (id_tienda,) * 6).fetchone()
 
-        ventas_mes = float(resumen["ventas_mes"] or 0)
         ordenes = int(resumen["ordenes"] or 0)
-        costo_total = float(resumen["costo_total"] or 0)
+        ventas_brutas = float(resumen["ventas_brutas"] or 0)
+        devoluciones_mes = float(resumen["devoluciones"] or 0)
+        costo_total = float(resumen["costo_ventas"] or 0) \
+            - float(resumen["costo_devoluciones"] or 0)
         gastos_mes = float(resumen["gastos_mes"] or 0)
+
+        # Ventas netas: lo que sumo la venta menos lo que se devolvio.
+        ventas_mes = ventas_brutas - devoluciones_mes
 
         ticket_promedio = (
             ventas_mes / ordenes if ordenes > 0 else 0
@@ -74,7 +108,7 @@ def obtener_dashboard():
 
         # =========================================
         # 2. GANANCIA ESTIMADA DEL MES
-        # (ingresos - costo de lo vendido - gastos del mes)
+        # (ventas netas - costo neto - gastos del mes)
         # =========================================
         ganancia_estimada = ventas_mes - costo_total - gastos_mes
 
@@ -124,24 +158,40 @@ def obtener_dashboard():
         ]
 
         # =========================================
-        # 4. PRODUCTOS MAS VENDIDOS DEL MES
+        # 4. PRODUCTOS MAS VENDIDOS DEL MES (neto de devoluciones)
         # =========================================
         filas_vendidos = db.execute("""
             SELECT
                 p.id,
                 p.nombre,
-                SUM(d.cantidad) AS cantidad_vendida
+                SUM(
+                    CASE WHEN v.tipo = 'venta'
+                         THEN d.cantidad
+                         ELSE -d.cantidad
+                    END
+                ) AS cantidad_vendida
             FROM detalle_ventas d
             INNER JOIN productos p
                 ON p.id = d.id_producto
             INNER JOIN ventas v
                 ON v.id = d.id_venta
             WHERE v.id_tienda = ?
-              AND v.tipo = 'venta'
               AND v.estado = 'completada'
+              AND (
+                    v.tipo = 'venta'
+                    OR (
+                        v.tipo = 'devolucion'
+                        AND EXISTS (
+                            SELECT 1 FROM ventas o
+                            WHERE o.id = v.id_venta_origen
+                              AND o.estado = 'completada'
+                        )
+                    )
+              )
               AND strftime('%Y-%m', v.fecha) =
                   strftime('%Y-%m', 'now', 'localtime')
             GROUP BY p.id, p.nombre
+            HAVING cantidad_vendida > 0
             ORDER BY cantidad_vendida DESC, p.nombre ASC
             LIMIT 5
         """, (id_tienda,)).fetchall()
@@ -157,6 +207,8 @@ def obtener_dashboard():
 
         return jsonify({
             "ventas_mes": round(ventas_mes, 2),
+            "ventas_brutas": round(ventas_brutas, 2),
+            "devoluciones_mes": round(devoluciones_mes, 2),
             "gastos_mes": round(gastos_mes, 2),
             "ganancia_estimada": round(ganancia_estimada, 2),
             "ordenes_realizadas": ordenes,

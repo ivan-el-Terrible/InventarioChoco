@@ -72,6 +72,15 @@ def servir_app_en_navegacion():
     return send_from_directory(str(FRONTEND_DIST), 'index.html')
 
 
+@app.after_request
+def sin_cache_para_html(respuesta):
+    """El index.html no se cachea: al publicar un build nuevo, un simple
+    F5 ya toma la ultima version (antes habia que hacer Ctrl+F5)."""
+    if 'text/html' in (respuesta.content_type or ''):
+        respuesta.headers['Cache-Control'] = 'no-cache'
+    return respuesta
+
+
 @app.route('/')
 def inicio():
     return send_from_directory(str(FRONTEND_DIST), 'index.html')
@@ -86,8 +95,57 @@ def servir_react(ruta):
 if __name__ == '__main__':
     # Modo desarrollo: Ctrl+C detiene el servidor, sin icono de bandeja.
     # La version portable con pystray se reincorporara al empaquetar.
+    import os
+    import subprocess
+    import sys
+    import threading
+    import time
+    import urllib.request
+
     from waitress import serve
+
+    def vigia():
+        """Vigia anti-congelamiento (la "base no carga").
+
+        El cliente de Turso puede dejar hilos esperando para siempre si la
+        red se corta a mitad de una consulta. El vigia se auto-prueba por
+        HTTP cada minuto: si el servidor no responde 3 veces seguidas, se
+        relanza solo para descongelarlo y volver a conectar.
+        """
+        fallos = 0
+        while True:
+            time.sleep(60)
+            try:
+                urllib.request.urlopen(
+                    'http://127.0.0.1:5000/api/estado', timeout=10
+                ).read()
+                fallos = 0
+            except Exception:
+                fallos += 1
+                print(f'VIGIA: el servidor no responde ({fallos}/3)',
+                      flush=True)
+                if fallos >= 3:
+                    print('VIGIA: relanzando el servidor para descongelarlo',
+                          flush=True)
+                    subprocess.Popen(
+                        [sys.executable, os.path.abspath(sys.argv[0])]
+                        + sys.argv[1:],
+                        cwd=os.path.dirname(os.path.abspath(__file__))
+                    )
+                    os._exit(0)
+
+    threading.Thread(target=vigia, daemon=True).start()
+
     print('InventarioChoco: http://127.0.0.1:5000')
     # 12 hilos: el frontend lanza varios pedidos en paralelo y si la red a
     # Turso se corta a mitad de peticion, sobra margen mientras se reconecta.
-    serve(app, host='127.0.0.1', port=5000, threads=12)
+    # Si el vigia relanza el servidor, el puerto puede tardar un instante en
+    # liberarse: se reintenta en lugar de morir.
+    for intento in range(10):
+        try:
+            serve(app, host='127.0.0.1', port=5000, threads=12)
+            break
+        except OSError:
+            print(f'puerto 5000 ocupado, reintentando ({intento + 1}/10)...',
+                  flush=True)
+            time.sleep(2)

@@ -58,8 +58,9 @@ export default function VentasPro() {
   }, []);
 
   // Precios y stock se refrescan solos: la página del vendedor siempre
-  // muestra lo último sin tener que recargar.
-  useAutoRefetch(() => { cargarProductos(true); }, 15000);
+  // muestra lo último sin tener que recargar. Con ~3000 productos se
+  // espacia a 30 s para no saturar la conexión con Turso.
+  useAutoRefetch(() => { cargarProductos(true); }, 30000);
 
   const [busqueda, setBusqueda] = useState('');
   const [carrito, setCarrito] = useState([]);

@@ -17,6 +17,7 @@ import ListaProductos from './pages/inventario/ListaProductos';
 import EntradaStock from './pages/inventario/EntradaStock';
 import DashboardInv from './pages/inventario/DashboardInv';
 import VentasPro from './pages/VentasPro';
+import DevolucionPro from './pages/DevolucionPro';
 import Usuarios from './pages/Usuarios';
 import VentasVendedores from './pages/VentasVendedores';
 import Gastos from './pages/Gastos';
@@ -187,6 +188,12 @@ export default function App() {
             <Route
               path="/ventas"
               element={<VentasPro />}
+            />
+
+            {/* Devoluciones: admin y vendedor, sin restricciones */}
+            <Route
+              path="/devoluciones"
+              element={<DevolucionPro />}
             />
 
             <Route
