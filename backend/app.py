@@ -1,189 +1,151 @@
-
+import os
 import sys
 from pathlib import Path
-
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
 from config import obtener_clave_secreta
-from database.database import init_db
-
+from database.database import init_db, ULTIMO_ESTADO
 from routes.productos import productos_bp
-from routes.proveedores import proveedores_bp
 from routes.ventas import ventas_bp
 from routes.kardex import kardex_bp
 from routes.usuarios import usuarios_bp
 from routes.dashboard import dashboard_bp
+from routes.gastos import gastos_bp
+from routes.mantenimiento import mantenimiento_bp
 
-
-# =========================================
-# UBICACION DEL FRONTEND COMPILADO
-# =========================================
-
-if getattr(sys, "frozen", False):
-    # Ubicacion de los recursos de PyInstaller
+if getattr(sys, 'frozen', False):
     CARPETA_RECURSOS = Path(sys._MEIPASS)
 else:
-    # Ubicacion del proyecto original
     CARPETA_RECURSOS = Path(__file__).resolve().parent.parent
-
-FRONTEND_DIST = CARPETA_RECURSOS / "frontend" / "dist"
-
-
-# =========================================
-# CONFIGURACION DE FLASK
-# =========================================
+FRONTEND_DIST = CARPETA_RECURSOS / 'frontend' / 'dist'
 
 app = Flask(__name__, static_folder=None)
+app.config['SECRET_KEY'] = obtener_clave_secreta()
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('APP_HTTPS', '0') == '1'
 
-# Clave secreta persistente para sesiones
-app.config["SECRET_KEY"] = obtener_clave_secreta()
-
-# Configuracion de cookies
-app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = False
-
-# Permitir React en modo desarrollo con Vite
-CORS(
-    app,
-    origins=["http://localhost:5173"],
-    supports_credentials=True
-)
-
-
-# =========================================
-# INICIALIZAR BASE DE DATOS
-# =========================================
+CORS(app, origins=['http://localhost:5173'], supports_credentials=True)
 
 init_db()
 
-
-# =========================================
-# REGISTRAR RUTAS EXISTENTES
-# =========================================
-
 app.register_blueprint(productos_bp)
-app.register_blueprint(proveedores_bp)
 app.register_blueprint(ventas_bp)
 app.register_blueprint(kardex_bp)
 app.register_blueprint(usuarios_bp)
 app.register_blueprint(dashboard_bp)
+app.register_blueprint(gastos_bp)
+app.register_blueprint(mantenimiento_bp)
 
-
-# =========================================
-# API DE COMPROBACION
-# =========================================
-
-@app.route("/api/estado")
+@app.route('/api/estado')
 def estado_api():
+    """Estado de la conexion con la base de datos en la nube."""
     return jsonify({
-        "mensaje": "API Inventario Choco funcionando"
+        'mensaje': 'API InventarioChoco conectada a Turso',
+        'base_datos': ULTIMO_ESTADO['base'],
+        'estado': ULTIMO_ESTADO['estado'],
+        'tablas': ULTIMO_ESTADO['tablas'],
+        'detalle': ULTIMO_ESTADO['mensaje'],
     })
 
+@app.before_request
+def servir_app_en_navegacion():
+    """Evita que al recargar se muestre JSON en lugar de la página.
 
-# =========================================
-# MOSTRAR REACT DESDE FLASK
-# =========================================
+    Varias rutas de la API coinciden con rutas de React (por ejemplo
+    GET /ventas). Cuando el navegador pide HTML (recargar o escribir la
+    URL) devolvemos index.html; cuando lo pide un fetch de JavaScript
+    (Accept: */*) seguimos devolviendo el JSON.
+    """
+    if request.method != 'GET' or request.path.startswith('/api/'):
+        return None
+    if 'text/html' not in request.headers.get('Accept', ''):
+        return None
+    if request.path == '/' or not FRONTEND_DIST.is_dir():
+        return None
+    if '..' in request.path:
+        return None
+    archivo = (FRONTEND_DIST / request.path.lstrip('/')).resolve()
+    if str(archivo).startswith(str(FRONTEND_DIST.resolve())) and archivo.is_file():
+        return None  # Es un archivo real del dist (js, css, imagen).
+    return send_from_directory(str(FRONTEND_DIST), 'index.html')
 
-@app.route("/")
+
+@app.after_request
+def sin_cache_para_html(respuesta):
+    """El index.html no se cachea: al publicar un build nuevo, un simple
+    F5 ya toma la ultima version (antes habia que hacer Ctrl+F5)."""
+    if 'text/html' in (respuesta.content_type or ''):
+        respuesta.headers['Cache-Control'] = 'no-cache'
+    return respuesta
+
+
+@app.route('/')
 def inicio():
-    return send_from_directory(
-        str(FRONTEND_DIST),
-        "index.html"
-    )
+    return send_from_directory(str(FRONTEND_DIST), 'index.html')
 
-
-@app.route("/<path:ruta>")
+@app.route('/<path:ruta>')
 def servir_react(ruta):
-
-    # Buscar el archivo solicitado en dist
     archivo = FRONTEND_DIST / ruta
-
     if archivo.is_file():
-        return send_from_directory(
-            str(FRONTEND_DIST),
-            ruta
-        )
+        return send_from_directory(str(FRONTEND_DIST), ruta)
+    return send_from_directory(str(FRONTEND_DIST), 'index.html')
 
-    # Permitir rutas de React Router
-    return send_from_directory(
-        str(FRONTEND_DIST),
-        "index.html"
-    )
-
-
-# =========================================
-# INICIAR SERVIDOR
-# =========================================
-
-if __name__ == "__main__":
+if __name__ == '__main__':
+    # Modo desarrollo: Ctrl+C detiene el servidor, sin icono de bandeja.
+    # La version portable con pystray se reincorporara al empaquetar.
     import os
+    import subprocess
+    import sys
     import threading
     import time
-    import webbrowser
+    import urllib.request
 
-    import pystray
-    from PIL import Image, ImageDraw
-    from waitress import create_server
+    from waitress import serve
 
-    URL = "http://127.0.0.1:5000"
+    def vigia():
+        """Vigia anti-congelamiento (la "base no carga").
 
-    def crear_icono():
-        imagen = Image.new("RGB", (64, 64), "#F97316")
-        dibujo = ImageDraw.Draw(imagen)
+        El cliente de Turso puede dejar hilos esperando para siempre si la
+        red se corta a mitad de una consulta. El vigia se auto-prueba por
+        HTTP cada minuto: si el servidor no responde 3 veces seguidas, se
+        relanza solo para descongelarlo y volver a conectar.
+        """
+        fallos = 0
+        while True:
+            time.sleep(60)
+            try:
+                urllib.request.urlopen(
+                    'http://127.0.0.1:5000/api/estado', timeout=10
+                ).read()
+                fallos = 0
+            except Exception:
+                fallos += 1
+                print(f'VIGIA: el servidor no responde ({fallos}/3)',
+                      flush=True)
+                if fallos >= 3:
+                    print('VIGIA: relanzando el servidor para descongelarlo',
+                          flush=True)
+                    subprocess.Popen(
+                        [sys.executable, os.path.abspath(sys.argv[0])]
+                        + sys.argv[1:],
+                        cwd=os.path.dirname(os.path.abspath(__file__))
+                    )
+                    os._exit(0)
 
-        dibujo.rounded_rectangle(
-            (12, 12, 52, 52),
-            radius=10,
-            fill="#FFFFFF"
-        )
-        dibujo.text((23, 20), "IC", fill="#F97316")
+    threading.Thread(target=vigia, daemon=True).start()
 
-        return imagen
-
-    def abrir_navegador(icono=None, item=None):
-        webbrowser.open(URL)
-
-    servidor = create_server(
-        app,
-        host="127.0.0.1",
-        port=5000,
-        threads=4
-    )
-
-    def ejecutar_servidor():
-        servidor.run()
-
-    def cerrar_programa(icono, item):
-        icono.stop()
-
-        # Detener Waitress y finalizar el proceso.
-        os._exit(0)
-
-    hilo_servidor = threading.Thread(
-        target=ejecutar_servidor,
-        daemon=True
-    )
-    hilo_servidor.start()
-
-    time.sleep(1)
-    abrir_navegador()
-
-    icono = pystray.Icon(
-        "InventarioChoco",
-        crear_icono(),
-        "InventarioChoco",
-        menu=pystray.Menu(
-            pystray.MenuItem(
-                "Abrir InventarioChoco",
-                abrir_navegador
-            ),
-            pystray.MenuItem(
-                "Salir de InventarioChoco",
-                cerrar_programa
-            )
-        )
-    )
-
-    icono.run()
+    print('InventarioChoco: http://127.0.0.1:5000')
+    # 12 hilos: el frontend lanza varios pedidos en paralelo y si la red a
+    # Turso se corta a mitad de peticion, sobra margen mientras se reconecta.
+    # Si el vigia relanza el servidor, el puerto puede tardar un instante en
+    # liberarse: se reintenta en lugar de morir.
+    for intento in range(10):
+        try:
+            serve(app, host='127.0.0.1', port=5000, threads=12)
+            break
+        except OSError:
+            print(f'puerto 5000 ocupado, reintentando ({intento + 1}/10)...',
+                  flush=True)
+            time.sleep(2)

@@ -5,13 +5,18 @@ import {
   DollarSign,
   AlertTriangle,
   ShoppingBag,
-  RefreshCw
+  RefreshCw,
+  Wallet
 } from 'lucide-react';
+import useAutoRefetch from '../../hooks/useAutoRefetch';
+import SelectorTienda from '../../components/SelectorTienda';
+import AvisoPurga from '../../components/AvisoPurga';
 
 const API = '';
 
 const datosIniciales = {
   ventas_mes: 0,
+  gastos_mes: 0,
   ganancia_estimada: 0,
   ordenes_realizadas: 0,
   ticket_promedio: 0,
@@ -37,13 +42,18 @@ export default function DashboardInv() {
   const [datos, setDatos] = useState(datosIniciales);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
+  const [tiendaSeleccionada, setTiendaSeleccionada] = useState('');
 
-  const cargarDashboard = async () => {
-    setCargando(true);
+  // silencioso = true evita el parpadeo de "Cargando" en la auto-actualización.
+  const cargarDashboard = async (silencioso = false) => {
+    if (!silencioso) setCargando(true);
     setError('');
 
     try {
-      const respuesta = await fetch(`${API}/dashboard`, {
+      const query = tiendaSeleccionada
+        ? `?id_tienda=${encodeURIComponent(tiendaSeleccionada)}`
+        : '';
+      const respuesta = await fetch(`${API}/dashboard${query}`, {
         credentials: 'include'
       });
 
@@ -57,15 +67,20 @@ export default function DashboardInv() {
 
       setDatos(resultado);
     } catch (err) {
-      setError(err.message);
+      if (!silencioso) setError(err.message);
     } finally {
-      setCargando(false);
+      if (!silencioso) setCargando(false);
     }
   };
 
   useEffect(() => {
     cargarDashboard();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tiendaSeleccionada]);
+
+  // Los indicadores se refrescan solos: al entrar un mes nuevo el backend
+  // calcula automáticamente los datos del mes en curso.
+  useAutoRefetch(() => { cargarDashboard(true); }, 60000);
 
   const productosVendidos = datos.productos_mas_vendidos || [];
   const categorias = datos.valor_inventario || [];
@@ -81,7 +96,7 @@ export default function DashboardInv() {
   );
 
   return (
-    <div className="min-h-screen space-y-6 bg-slate-900 p-6 text-slate-100">
+    <div className="min-h-screen space-y-6 bg-[#0F172A] p-6 text-slate-100">
 
       {/* ENCABEZADO */}
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -89,113 +104,113 @@ export default function DashboardInv() {
           <h1 className="text-2xl font-bold text-slate-100">
             Panel de Control General
           </h1>
-          <p className="text-sm text-slate-300">
+          <p className="text-sm text-slate-400">
             Visión general del estado comercial e inventarios
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={cargarDashboard}
-          disabled={cargando}
-          className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
-        >
-          <RefreshCw
-            size={17}
-            className={cargando ? 'animate-spin' : ''}
+        <div className="flex flex-wrap items-center gap-3">
+          <SelectorTienda
+            valor={tiendaSeleccionada}
+            onChange={setTiendaSeleccionada}
           />
-          {cargando ? 'Actualizando...' : 'Actualizar'}
-        </button>
+
+          <button
+            type="button"
+            onClick={() => cargarDashboard()}
+            disabled={cargando}
+            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
+          >
+            <RefreshCw
+              size={17}
+              className={cargando ? 'animate-spin' : ''}
+            />
+            {cargando ? 'Actualizando...' : 'Actualizar'}
+          </button>
+        </div>
       </div>
 
       {/* ERROR */}
       {error && (
-        <div className="rounded-xl border border-red-700 bg-red-950 p-4 text-red-200">
+        <div className="rounded-lg border border-rose-800 bg-rose-950 p-4 text-rose-200">
           {error}
         </div>
       )}
 
+      {/* AVISO DE PURGA AUTOMATICA (con copia de seguridad) */}
+      <AvisoPurga />
+
       {/* INDICADORES */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
 
         {/* VENTAS DEL MES */}
-        <div className="rounded-2xl border border-slate-600 bg-slate-700 p-5 shadow-sm">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-bold uppercase text-slate-100">
-              Ventas del Mes
+        <div className="flex items-center gap-3 rounded-xl border border-slate-700 bg-[#1E293B] p-5">
+          <DollarSign className="text-emerald-400" size={26} />
+          <div className="min-w-0">
+            <p className="text-sm text-slate-400">Ventas del Mes</p>
+            <p className="text-2xl font-bold">
+              {cargando ? '...' : formatoDinero(datos.ventas_mes)}
+            </p>
+            <span className="mt-1 block text-xs font-semibold text-emerald-300">
+              Ingresos registrados este mes
             </span>
-            <div className="rounded-lg bg-emerald-50 p-2 text-emerald-600">
-              <DollarSign size={18} />
-            </div>
           </div>
-
-          <p className="text-2xl font-extrabold text-slate-50">
-            {cargando ? '...' : formatoDinero(datos.ventas_mes)}
-          </p>
-
-          <span className="mt-1 block text-xs font-semibold text-emerald-300">
-            Ingresos registrados este mes
-          </span>
         </div>
 
         {/* GANANCIA ESTIMADA */}
-        <div className="rounded-2xl border border-slate-600 bg-slate-700 p-5 shadow-sm">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-bold uppercase text-slate-100">
-              Ganancia Estimada
+        <div className="flex items-center gap-3 rounded-xl border border-slate-700 bg-[#1E293B] p-5">
+          <TrendingUp className="text-blue-400" size={26} />
+          <div className="min-w-0">
+            <p className="text-sm text-slate-400">Ganancia Estimada</p>
+            <p className="text-2xl font-bold">
+              {cargando ? '...' : formatoDinero(datos.ganancia_estimada)}
+            </p>
+            <span className="mt-1 block text-xs text-slate-400">
+              Ventas - costos - gastos · Margen: {Number(datos.margen_promedio || 0).toFixed(2)}%
             </span>
-            <div className="rounded-lg bg-blue-50 p-2 text-blue-600">
-              <TrendingUp size={18} />
-            </div>
           </div>
+        </div>
 
-          <p className="text-2xl font-extrabold text-slate-50">
-            {cargando ? '...' : formatoDinero(datos.ganancia_estimada)}
-          </p>
-
-          <span className="mt-1 block text-xs text-slate-200">
-            Margen estimado: {Number(datos.margen_promedio || 0).toFixed(2)}%
-          </span>
+        {/* GASTOS DEL MES */}
+        <div className="flex items-center gap-3 rounded-xl border border-slate-700 bg-[#1E293B] p-5">
+          <Wallet className="text-rose-400" size={26} />
+          <div className="min-w-0">
+            <p className="text-sm text-slate-400">Gastos del Mes</p>
+            <p className="text-2xl font-bold">
+              {cargando ? '...' : formatoDinero(datos.gastos_mes)}
+            </p>
+            <span className="mt-1 block text-xs font-semibold text-rose-300">
+              Gastos vigentes descontados de la ganancia
+            </span>
+          </div>
         </div>
 
         {/* ORDENES REALIZADAS */}
-        <div className="rounded-2xl border border-slate-600 bg-slate-700 p-5 shadow-sm">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-bold uppercase text-slate-100">
-              Órdenes Realizadas
+        <div className="flex items-center gap-3 rounded-xl border border-slate-700 bg-[#1E293B] p-5">
+          <ShoppingBag className="text-purple-400" size={26} />
+          <div className="min-w-0">
+            <p className="text-sm text-slate-400">Órdenes Realizadas</p>
+            <p className="text-2xl font-bold">
+              {cargando ? '...' : datos.ordenes_realizadas}
+            </p>
+            <span className="mt-1 block text-xs text-slate-400">
+              Ticket promedio: {formatoDinero(datos.ticket_promedio)}
             </span>
-            <div className="rounded-lg bg-purple-50 p-2 text-purple-600">
-              <ShoppingBag size={18} />
-            </div>
           </div>
-
-          <p className="text-2xl font-extrabold text-slate-50">
-            {cargando ? '...' : datos.ordenes_realizadas}
-          </p>
-
-          <span className="mt-1 block text-xs text-slate-200">
-            Ticket promedio: {formatoDinero(datos.ticket_promedio)}
-          </span>
         </div>
 
         {/* PRODUCTOS CRITICOS */}
-        <div className="rounded-2xl border border-slate-600 bg-slate-700 p-5 shadow-sm">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-bold uppercase text-slate-100">
-              Productos Críticos
+        <div className="flex items-center gap-3 rounded-xl border border-slate-700 bg-[#1E293B] p-5">
+          <AlertTriangle className="text-amber-400" size={26} />
+          <div className="min-w-0">
+            <p className="text-sm text-slate-400">Productos Críticos</p>
+            <p className="text-2xl font-bold">
+              {cargando ? '...' : `${datos.productos_criticos} SKUs`}
+            </p>
+            <span className="mt-1 block text-xs font-semibold text-amber-300">
+              Stock menor o igual a {datos.limite_stock_critico}
             </span>
-            <div className="rounded-lg bg-amber-50 p-2 text-amber-600">
-              <AlertTriangle size={18} />
-            </div>
           </div>
-
-          <p className="text-2xl font-extrabold text-slate-50">
-            {cargando ? '...' : `${datos.productos_criticos} SKUs`}
-          </p>
-
-          <span className="mt-1 block text-xs font-semibold text-amber-300">
-            Stock menor o igual a {datos.limite_stock_critico}
-          </span>
         </div>
       </div>
 
@@ -203,17 +218,17 @@ export default function DashboardInv() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
 
         {/* PRODUCTOS MAS VENDIDOS */}
-        <div className="rounded-2xl border border-slate-600 bg-slate-700 p-6 shadow-sm">
+        <div className="rounded-xl border border-slate-700 bg-[#1E293B] p-6">
           <h3 className="mb-1 font-bold text-slate-100">
             Productos Más Vendidos
           </h3>
 
-          <p className="mb-5 text-xs text-slate-300">
+          <p className="mb-5 text-xs text-slate-400">
             Los cinco productos más vendidos del mes
           </p>
 
           {productosVendidos.length === 0 ? (
-            <p className="py-6 text-center text-sm text-slate-300">
+            <p className="py-6 text-center text-sm text-slate-400">
               No hay productos vendidos este mes.
             </p>
           ) : (
@@ -234,7 +249,7 @@ export default function DashboardInv() {
                       </span>
                     </div>
 
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-500">
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-700">
                       <div
                         className="h-2 rounded-full bg-blue-500 transition-all"
                         style={{ width: `${porcentaje}%` }}
@@ -248,17 +263,17 @@ export default function DashboardInv() {
         </div>
 
         {/* VALOR DEL INVENTARIO */}
-        <div className="rounded-2xl border border-slate-600 bg-slate-700 p-6 shadow-sm">
+        <div className="rounded-xl border border-slate-700 bg-[#1E293B] p-6">
           <h3 className="mb-1 font-bold text-slate-100">
             Distribución del Valor de Inventario
           </h3>
 
-          <p className="mb-5 text-xs text-slate-300">
+          <p className="mb-5 text-xs text-slate-400">
             Valor de las existencias por tipo de producto
           </p>
 
           {categorias.length === 0 ? (
-            <p className="py-6 text-center text-sm text-slate-300">
+            <p className="py-6 text-center text-sm text-slate-400">
               No hay productos registrados.
             </p>
           ) : (
@@ -266,19 +281,19 @@ export default function DashboardInv() {
               {categorias.map((categoria) => (
                 <div
                   key={categoria.categoria}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 p-3"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-700 bg-[#0F172A] p-3"
                 >
-                  <span className="text-sm text-slate-600">
+                  <span className="text-sm text-slate-300">
                     {categoria.categoria}
                   </span>
 
-                  <span className="font-bold text-slate-800">
+                  <span className="font-bold text-slate-100">
                     {formatoDinero(categoria.valor)}
                   </span>
                 </div>
               ))}
 
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-500 pt-4">
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-700 pt-4">
                 <span className="text-sm font-bold text-slate-100">
                   Valor total del inventario
                 </span>
